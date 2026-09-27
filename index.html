@@ -4,7 +4,17 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="NoteMate: a chess study board for notes, variations, engine analysis and an in-browser chess model." />
     <title>NoteMate</title>
+    <script>
+      // Apply the saved theme before first paint so there is no flash.
+      try {
+        var s = JSON.parse(localStorage.getItem('notemate.ui.v1') || '{}');
+        var t = s.theme === 'light' || s.theme === 'dark' ? s.theme : matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        document.documentElement.dataset.theme = t;
+        if (s.motion) document.documentElement.dataset.motion = s.motion;
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

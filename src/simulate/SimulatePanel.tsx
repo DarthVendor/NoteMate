@@ -70,15 +70,14 @@ export function SimulatePanel({ sim, cm, state, dispatch, onExport }: Props) {
   return (
     <div className="engine-panel sim-panel" data-testid="sim-panel">
       <header className="engine-header">
-        <button className="sim-toggle" onClick={() => update({ open: !s.open })} aria-expanded={s.open} data-testid="sim-toggle">
-          <span className="sim-caret">{s.open ? '▾' : '▸'}</span> Simulate
-        </button>
+        <span className="sim-title">ChessMind vs Stockfish</span>
         <span className={`engine-status ${busy ? 'status-ready' : ''}`} data-testid="sim-status">
-          {phase === 'idle' ? (games.length ? `${t.w}W ${t.d}D ${t.l}L` : 'ChessMind vs Stockfish') : phase === 'loading' ? 'starting…' : phase}
+          {busy && <span className="status-dot on" aria-hidden />}
+          {phase === 'idle' ? (games.length ? `${t.w}W ${t.d}D ${t.l}L` : 'idle') : phase === 'loading' ? 'starting…' : phase}
         </span>
       </header>
 
-      {s.open && (
+      {(
         <>
           {!modelReady && (
             <p className="hint engine-desc" data-testid="sim-model-hint">
@@ -159,7 +158,7 @@ export function SimulatePanel({ sim, cm, state, dispatch, onExport }: Props) {
 
           <div className="sim-buttons">
             {!busy ? (
-              <button className="button" onClick={sim.start} data-testid="sim-start">Start</button>
+              <button className="button btn-primary" onClick={sim.start} data-testid="sim-start">Start</button>
             ) : phase === 'paused' ? (
               <button className="button" onClick={sim.resume} data-testid="sim-resume">Resume</button>
             ) : (

@@ -10,6 +10,8 @@ const isolationHeaders = {
 
 export default defineConfig({
   plugins: [react()],
+  // Piece sets ship as separate files so only the chosen set is fetched (and the main bundle stays small).
+  build: { assetsInlineLimit: (file: string) => (file.includes('/pieces/') ? false : undefined) },
   server: { headers: isolationHeaders },
   preview: { headers: isolationHeaders },
 });

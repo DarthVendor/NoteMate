@@ -17,9 +17,14 @@
     "chessmind": "node scripts/copy-chessmind.mjs"
   },
   "dependencies": {
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
+    "@fontsource-variable/newsreader": "^5.3.0",
     "chess.js": "^1.4.0",
+    "lucide-react": "^1.48.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "react-resizable-panels": "^4.14.1",
     "stockfish": "^19.0.0"
   },
   "devDependencies": {

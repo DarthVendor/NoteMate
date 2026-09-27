@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
+import { ArrowUpToLine, GitBranch, ListTree, MoveUpRight, StickyNote, Trash2 } from 'lucide-react';
 import type { GameState, MoveNode } from '../types';
+import { EmptyState } from '../ui/primitives';
 import { ROOT_ID } from '../types';
 import { isMainLine } from '../state/gameReducer';
 import type { GameAction } from '../state/gameReducer';
@@ -37,8 +39,8 @@ function MoveButton({
       {node.san}
       {(hasNotes || hasShapes) && (
         <span className="move-badges">
-          {hasNotes && <span title="Has notes">📝</span>}
-          {hasShapes && <span title="Has arrows or highlights">➶</span>}
+          {hasNotes && <StickyNote size={10} strokeWidth={2.2} aria-label="Has notes" />}
+          {hasShapes && <MoveUpRight size={10} strokeWidth={2.2} aria-label="Has arrows or highlights" />}
         </span>
       )}
     </button>
@@ -94,7 +96,7 @@ function Line({
   return <>{items}</>;
 }
 
-export function MoveList({ state, dispatch }: Props) {
+export function MoveList({ state, dispatch, onImport }: Props & { onImport?: () => void }) {
   const activeRef = useRef<HTMLButtonElement>(null);
   const { currentId } = state;
 
@@ -123,31 +125,34 @@ export function MoveList({ state, dispatch }: Props) {
 
   return (
     <div className="move-list">
-      <div className="move-nav">
-        <button onClick={() => dispatch({ type: 'START' })} title="Start (Home)">⏮</button>
-        <button onClick={() => dispatch({ type: 'BACK' })} title="Back (←)">◀</button>
-        <button onClick={() => dispatch({ type: 'FORWARD' })} title="Forward (→)">▶</button>
-        <button onClick={() => dispatch({ type: 'END' })} title="End of line (End)">⏭</button>
-      </div>
       {currentId !== ROOT_ID && (
-        <div className="line-tools">
+        <div className="line-tools" role="toolbar" aria-label="Variation tools">
           {siblingCount > 1 && (
-            <button onClick={() => dispatch({ type: 'SIBLING', delta: 1 })} title="Switch to the next alternative (↑/↓)">
-              ⇅ {siblingCount} alternatives
+            <button className="btn btn-ghost btn-sm" onClick={() => dispatch({ type: 'SIBLING', delta: 1 })} title="Switch to the next alternative (↑/↓)">
+              <GitBranch size={13} /> {siblingCount} alternatives
             </button>
           )}
           {!onMain && (
-            <button onClick={() => dispatch({ type: 'PROMOTE', id: currentId })} title="Make this variation the main line">
-              ↑ Make main line
+            <button className="btn btn-ghost btn-sm" onClick={() => dispatch({ type: 'PROMOTE', id: currentId })} title="Make this variation the main line">
+              <ArrowUpToLine size={13} /> Make main line
             </button>
           )}
-          <button className="danger-text" onClick={() => dispatch({ type: 'DELETE_FROM', id: currentId })} title="Delete this move and everything after it">
-            ✕ Delete from here
+          <span className="line-tools-spacer" />
+          <button className="btn btn-ghost btn-sm danger-text" onClick={() => dispatch({ type: 'DELETE_FROM', id: currentId })} title="Delete this move and everything after it">
+            <Trash2 size={13} /> Delete from here
           </button>
         </div>
       )}
       <div className="moves" ref={movesRef}>
-        {!firstMove && <p className="hint">Play moves on the board or import a PGN. Playing a different move from any position creates a variation.</p>}
+        {!firstMove && (
+          <EmptyState
+            icon={ListTree}
+            title="No moves yet"
+            actions={onImport && <button className="btn btn-sm" onClick={onImport}>Import PGN</button>}
+          >
+            Play a move on the board to start. Playing a different move from any earlier position creates a variation, shown indented here.
+          </EmptyState>
+        )}
         {firstMove && <Line state={state} startId={firstMove} startPly={1} depth={0} activeRef={activeRef} onGoto={onGoto} />}
         {state.meta.result && state.meta.result !== '*' && <div className="result">{state.meta.result}</div>}
       </div>

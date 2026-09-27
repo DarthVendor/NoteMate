@@ -1,5 +1,8 @@
+import { Plus, StickyNote, X } from 'lucide-react';
 import type { GameState, Note, NoteColor } from '../types';
 import { nodeLabel, nodePly } from '../state/gameReducer';
+import { ROOT_ID } from '../types';
+import { EmptyState } from '../ui/primitives';
 
 interface Props {
   state: GameState;
@@ -18,37 +21,49 @@ export function StickyNotes({ state, notes, onAdd, onUpdate, onDelete, onGoto }:
     .flatMap((node) => node.annotation!.notes.map((n) => ({ id: node.id, ply: nodePly(state, node.id), note: n })))
     .filter((x) => x.note.text.trim())
     .sort((a, b) => a.ply - b.ply);
+  const where = state.currentId === ROOT_ID ? 'Starting position' : nodeLabel(state, state.currentId);
 
   return (
-    <aside className="notes-panel">
+    <div className="notes-panel">
       <header className="notes-header">
-        <h2>Notes · {nodeLabel(state, state.currentId)}</h2>
-        <div className="note-add">
+        <div className="notes-where">
+          <span className="section-label">This position</span>
+          <span className="notes-pos">{where}</span>
+        </div>
+        <div className="note-add" role="group" aria-label="Add a note">
           {NOTE_COLORS.map((c) => (
-            <button
-              key={c}
-              className={`note-add-btn note-${c}`}
-              title={`Add ${c} note`}
-              onClick={() => onAdd(c)}
-            >
-              +
+            <button key={c} className={`note-add-btn note-${c}`} title={`Add a ${c} note (N)`} aria-label={`Add ${c} note`} onClick={() => onAdd(c)}>
+              <Plus size={12} strokeWidth={2.4} />
             </button>
           ))}
         </div>
       </header>
 
       <div className="notes-current">
-        {notes.length === 0 && <p className="hint">No notes on this position yet. Click a + to add a sticky.</p>}
-        {notes.map((n, i) => (
-          <div key={n.id} className={`sticky note-${n.color}`} style={{ '--tilt': `${((i % 3) - 1) * 1.2}deg` } as React.CSSProperties}>
+        {notes.length === 0 && (
+          <EmptyState
+            icon={StickyNote}
+            title="No notes here yet"
+            actions={
+              <button className="btn btn-sm" onClick={() => onAdd('yellow')}>
+                <Plus size={13} /> Add a note
+              </button>
+            }
+          >
+            Notes belong to this position and follow it through variations. They are exported as PGN comments.
+          </EmptyState>
+        )}
+        {notes.map((n) => (
+          <div key={n.id} className={`sticky note-${n.color}`}>
             {n.color === 'chessmind' && <span className="sticky-badge">ChessMind</span>}
-            <button className="sticky-delete" title="Delete note" onClick={() => onDelete(n.id)}>
-              ×
+            <button className="sticky-delete" title="Delete note" aria-label="Delete note" onClick={() => onDelete(n.id)}>
+              <X size={13} />
             </button>
             <textarea
               autoFocus={n.text === ''}
               value={n.text}
               placeholder="Write a note…"
+              aria-label="Note text"
               onChange={(e) => onUpdate(n.id, e.target.value)}
             />
           </div>
@@ -57,15 +72,15 @@ export function StickyNotes({ state, notes, onAdd, onUpdate, onDelete, onGoto }:
 
       {allNotes.length > 0 && (
         <section className="notes-all">
-          <h3>Elsewhere in this game</h3>
+          <h3 className="section-label">Elsewhere in this game</h3>
           {allNotes.map(({ id, note }) => (
             <button key={note.id} className={`note-link note-${note.color}`} onClick={() => onGoto(id)}>
               <strong>{nodeLabel(state, id)}</strong>
-              <span>{note.text.length > 80 ? note.text.slice(0, 80) + '…' : note.text}</span>
+              <span>{note.text.length > 90 ? note.text.slice(0, 90) + '…' : note.text}</span>
             </button>
           ))}
         </section>
       )}
-    </aside>
+    </div>
   );
 }

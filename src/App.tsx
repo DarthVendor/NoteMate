@@ -1,28 +1,42 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_POSITION } from 'chess.js';
-import { Board } from './components/Board';
-import { MoveList } from './components/MoveList';
-import { StickyNotes } from './components/StickyNotes';
-import { Toolbar } from './components/Toolbar';
+import './panels';
 import { PgnImport } from './components/PgnImport';
-import { EnginePanel } from './components/EnginePanel';
-import { EvalBar } from './components/EvalBar';
 import { useEngine } from './engine/useEngine';
 import { useChessMind } from './chessmind/useChessMind';
-import { ChessMindPanel } from './chessmind/ChessMindPanel';
-import { ROOT_ID, type Arrow, type Square } from './types';
+import { ROOT_ID, type Square } from './types';
 import type { Orientation } from './components/boardGeometry';
 import { useGame } from './state/useGame';
 import { useSimulate } from './simulate/useSimulate';
-import { SimulatePanel } from './simulate/SimulatePanel';
 import { toPgn } from './state/gameReducer';
+import { AppContext, type AppCtx } from './app/AppContext';
+import { BoardStage } from './app/BoardStage';
+import { TopBar } from './app/TopBar';
+import { CommandPalette } from './app/CommandPalette';
+import { ShortcutsSheet } from './app/ShortcutsSheet';
+import { buildCommands, eventKey, shortcutKey } from './app/commands';
+import { useMediaQuery, useUiSettings } from './ui/settings';
+import { useLayout } from './workspace/useLayout';
+import { showPanel } from './workspace/layout';
+import { Workspace } from './workspace/Workspace';
+import { MobileWorkspace } from './workspace/MobileWorkspace';
 
 export default function App() {
   const { state, dispatch, chess, annotation, lastMove } = useGame();
   const [orientation, setOrientation] = useState<Orientation>('white');
   const [showImport, setShowImport] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [overlay, setOverlay] = useState<'palette' | 'shortcuts' | null>(null);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [mobileTab, setMobileTab] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const confirmTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const { ui, updateUi } = useUiSettings();
+  const layout = useLayout();
+  const phone = useMediaQuery('(max-width: 760px)');
+  const compact = useMediaQuery('(max-width: 1100px)');
+
   const hasMoves = state.nodes[ROOT_ID].children.length > 0;
   const fen = chess.fen();
   const engine = useEngine(fen);
@@ -30,128 +44,113 @@ export default function App() {
   const uciMoves = useMemo(() => (standardStart ? chess.history({ verbose: true }).map((m) => m.lan) : null), [chess, standardStart]);
   const chessmind = useChessMind(uciMoves, state.chat ?? [], dispatch);
   const sim = useSimulate({ state, dispatch, cm: chessmind, engineSettings: engine.settings, engineAvailable: engine.available });
-  // Live overlay of the predicted moves (pinned ones are ordinary annotation arrows).
-  const pinnedCm = annotation.arrows.filter((a) => a.color === 'chessmind');
-  const cmMoves =
-    chessmind.settings.enabled && chessmind.settings.arrows && pinnedCm.length === 0 ? (chessmind.prediction?.moves ?? []) : [];
-  const chessmindArrows: Arrow[] = cmMoves.map((m) => ({
-    from: m.uci.slice(0, 2) as Square,
-    to: m.uci.slice(2, 4) as Square,
-    color: 'chessmind' as const,
-    opacity: 0.25 + 0.6 * (m.p / (cmMoves[0]?.p || 1)),
-  }));
 
-  const engineArrows: Arrow[] = engine.settings.enabled
-    ? engine.lines.slice(0, 1).flatMap((l) =>
-        l.pv[0] ? [{ from: l.pv[0].slice(0, 2) as Square, to: l.pv[0].slice(2, 4) as Square, color: 'engine' as const }] : [],
-      )
-    : [];
-  const playUci = (uci: string) =>
-    dispatch({ type: 'MAKE_MOVE', from: uci.slice(0, 2) as Square, to: uci.slice(2, 4) as Square, promotion: uci[4] as 'q' | 'r' | 'b' | 'n' | undefined });
+  const playUci = useCallback(
+    (uci: string) => dispatch({ type: 'MAKE_MOVE', from: uci.slice(0, 2) as Square, to: uci.slice(2, 4) as Square, promotion: uci[4] as 'q' | 'r' | 'b' | 'n' | undefined }),
+    [dispatch],
+  );
+  const flip = useCallback(() => setOrientation((o) => (o === 'white' ? 'black' : 'white')), []);
 
-  const flip = () => setOrientation((o) => (o === 'white' ? 'black' : 'white'));
+  const toast = useCallback((message: string) => {
+    setToastMsg(message);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToastMsg(null), 2400);
+  }, []);
 
+  const exportPgn = useCallback(
+    async (text?: string) => {
+      const pgn = text ?? toPgn(state);
+      try {
+        await navigator.clipboard.writeText(pgn);
+        toast('PGN copied to clipboard');
+      } catch {
+        toast('Clipboard unavailable; the PGN was written to the console');
+        console.log(pgn);
+      }
+    },
+    [state, toast],
+  );
+
+  const newGame = useCallback(() => {
+    if (!hasMoves || confirmReset) {
+      dispatch({ type: 'NEW_GAME' });
+      setConfirmReset(false);
+      clearTimeout(confirmTimer.current);
+      if (hasMoves) toast('Started a new game');
+    } else {
+      setConfirmReset(true);
+      clearTimeout(confirmTimer.current);
+      confirmTimer.current = setTimeout(() => setConfirmReset(false), 4000);
+    }
+  }, [hasMoves, confirmReset, dispatch, toast]);
+
+  const revealPanel = useCallback(
+    (id: string) => {
+      layout.edit((l) => showPanel(l, id));
+      setMobileTab(id);
+      requestAnimationFrame(() => document.getElementById(`tab-${id}`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
+    },
+    [layout],
+  );
+
+  const ctx: AppCtx = {
+    state, dispatch, chess, fen, annotation, lastMove, uciMoves, orientation, flip, playUci,
+    engine, chessmind, sim, ui, updateUi, layout, revealPanel, toast, exportPgn, newGame,
+    openImport: () => setShowImport(true),
+    openPalette: () => setOverlay('palette'),
+    openShortcuts: () => setOverlay('shortcuts'),
+  };
+  const commands = buildCommands(ctx);
+  const commandsRef = useRef(commands);
+  useEffect(() => {
+    commandsRef.current = commands;
+  });
+
+  // Global shortcuts, dispatched through the command list (so the palette and the sheet always agree).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT')) return;
-      switch (e.key) {
-        case 'ArrowLeft': dispatch({ type: 'BACK' }); break;
-        case 'ArrowRight': dispatch({ type: 'FORWARD' }); break;
-        case 'ArrowUp': dispatch({ type: 'SIBLING', delta: -1 }); break;
-        case 'ArrowDown': dispatch({ type: 'SIBLING', delta: 1 }); break;
-        case 'Home': dispatch({ type: 'START' }); break;
-        case 'End': dispatch({ type: 'END' }); break;
-        case 'f': case 'F': flip(); break;
-        default: return;
+      const key = eventKey(e);
+      if (key === 'Mod+k') {
+        e.preventDefault();
+        setOverlay((o) => (o === 'palette' ? null : 'palette'));
+        return;
       }
+      if (e.defaultPrevented || e.isComposing) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      if (document.querySelector('.modal-backdrop')) return;
+      // Let focused tabs, menus and buttons keep their own arrow-key handling.
+      if (e.key.startsWith('Arrow') && t?.closest('[role=tablist], [role=menu], [role=separator], [data-separator]')) return;
+      const cmd = commandsRef.current.find((c) => c.shortcuts?.some((s) => shortcutKey(s) === key));
+      if (!cmd) return;
       e.preventDefault();
+      cmd.run();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [dispatch]);
-
-  const exportPgn = async (text?: string) => {
-    const pgn = text ?? toPgn(state);
-    try {
-      await navigator.clipboard.writeText(pgn);
-      setToast('PGN copied to clipboard');
-    } catch {
-      setToast('Clipboard unavailable; PGN logged to console');
-      console.log(pgn);
-    }
-    setTimeout(() => setToast(null), 2000);
-  };
+  }, []);
 
   return (
-    <div className="app">
-      <section className="board-column">
-        <div className="board-with-eval">
-          {engine.settings.enabled && (
-            <EvalBar line={engine.lines[0]} sideToMove={chess.turn()} orientation={orientation} />
-          )}
-          <Board
-          chess={chess}
-          orientation={orientation}
-          arrows={[...chessmindArrows, ...engineArrows, ...annotation.arrows]}
-          highlights={annotation.highlights}
-          lastMove={lastMove}
-          onMove={(from, to, promotion) => dispatch({ type: 'MAKE_MOVE', from, to, promotion })}
-          onToggleArrow={(arrow) => dispatch({ type: 'TOGGLE_ARROW', arrow })}
-            onToggleHighlight={(highlight) => dispatch({ type: 'TOGGLE_HIGHLIGHT', highlight })}
-          />
-        </div>
-      </section>
+    <AppContext.Provider value={ctx}>
+      <div className={`app ${phone ? 'is-phone' : ''}`}>
+        <TopBar confirmingNew={confirmReset} compact={compact} />
+        {phone ? (
+          <MobileWorkspace api={layout} center={<BoardStage />} active={mobileTab} setActive={setMobileTab} />
+        ) : (
+          <Workspace api={layout} center={<BoardStage />} />
+        )}
+      </div>
 
-      <section className="side-column">
-        <Toolbar
-          state={state}
-          fen={fen}
-          confirmingReset={confirmReset}
-          onNewGame={() => {
-            if (!hasMoves || confirmReset) {
-              dispatch({ type: 'NEW_GAME' });
-              setConfirmReset(false);
-            } else {
-              setConfirmReset(true);
-              setTimeout(() => setConfirmReset(false), 4000);
-            }
-          }}
-          onFlip={flip}
-          onClearShapes={() => dispatch({ type: 'CLEAR_SHAPES' })}
-          onImport={() => setShowImport(true)}
-          onExport={() => exportPgn()}
-        />
-        <EnginePanel
-          fen={fen}
-          settings={engine.settings}
-          update={engine.update}
-          status={engine.status}
-          engineName={engine.engineName}
-          error={engine.error}
-          lines={engine.lines}
-          available={engine.available}
-          progress={engine.progress}
-          onPlayUci={playUci}
-        />
-        <ChessMindPanel cm={chessmind} state={state} dispatch={dispatch} chess={chess} fen={fen} uciMoves={uciMoves} onPlayUci={playUci} onFlip={flip} />
-        <SimulatePanel sim={sim} cm={chessmind} state={state} dispatch={dispatch} onExport={(pgn) => exportPgn(pgn)} />
-        <MoveList state={state} dispatch={dispatch} />
-      </section>
-
-      <StickyNotes
-        state={state}
-        notes={annotation.notes}
-        onAdd={(color) => dispatch({ type: 'ADD_NOTE', color })}
-        onUpdate={(id, text) => dispatch({ type: 'UPDATE_NOTE', id, text })}
-        onDelete={(id) => dispatch({ type: 'DELETE_NOTE', id })}
-        onGoto={(id) => dispatch({ type: 'GOTO', id })}
-      />
-
-      {showImport && (
-        <PgnImport onImport={(pgn) => dispatch({ type: 'LOAD_PGN', pgn })} onClose={() => setShowImport(false)} />
-      )}
-      {toast && <div className="toast">{toast}</div>}
-    </div>
+      {showImport && <PgnImport onImport={(pgn) => dispatch({ type: 'LOAD_PGN', pgn })} onClose={() => setShowImport(false)} />}
+      {overlay === 'palette' && <CommandPalette commands={commands} onClose={() => setOverlay(null)} />}
+      {overlay === 'shortcuts' && <ShortcutsSheet commands={commands} onClose={() => setOverlay(null)} />}
+      <div className="toast-region" aria-live="polite">
+        {toastMsg && (
+          <div className="toast" key={toastMsg}>
+            {toastMsg}
+          </div>
+        )}
+      </div>
+    </AppContext.Provider>
   );
 }

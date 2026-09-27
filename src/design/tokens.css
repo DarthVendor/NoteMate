@@ -1,0 +1,163 @@
+/*
+ * NoteMate design tokens.
+ * Everything visual reads from these custom properties; themes only redefine them.
+ * Theme is chosen by [data-theme] on <html> (set from Settings: system / light / dark).
+ */
+:root {
+  /* ---- Type ---- */
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-serif: 'Newsreader Variable', 'Iowan Old Style', Georgia, serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --fs-2xs: 10.5px;
+  --fs-xs: 11.5px;
+  --fs-sm: 12.5px;
+  --fs-md: 13.5px; /* base UI size */
+  --fs-lg: 15px;
+  --fs-xl: 18px;
+  --fs-2xl: 22px;
+  --fs-3xl: 28px;
+  --lh-tight: 1.2;
+  --lh-normal: 1.45;
+  --lh-loose: 1.65;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --tracking-caps: 0.06em;
+
+  /* ---- Space (4px grid) ---- */
+  --sp-0: 2px;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+
+  /* ---- Radius: restrained, not rounded-everything ---- */
+  --r-xs: 3px;
+  --r-sm: 5px;
+  --r-md: 7px;
+  --r-lg: 10px;
+  --r-full: 999px;
+
+  /* ---- Motion ---- */
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.45, 0, 0.25, 1);
+  --dur-fast: 110ms;
+  --dur-med: 180ms;
+  --dur-slow: 280ms;
+  --dur-piece: 170ms; /* overridden by Settings -> Move animation */
+
+  /* ---- Layout ---- */
+  --topbar-h: 48px;
+  --tab-h: 34px;
+  --z-board-overlay: 20;
+  --z-popover: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+
+  /* ---- Fixed hues shared by both themes ---- */
+  --hue-green: #15781b;
+  --hue-red: #882020;
+  --hue-blue: #003088;
+  --hue-yellow: #e68f00;
+  --hue-engine: #4a90e2;
+  --hue-chessmind: #b04fd8;
+}
+
+/* ---- Dark: warm graphite ---- */
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #121110;
+  --bg-sunken: #0c0b0a;
+  --surface: #1a1917;
+  --surface-2: #211f1c;
+  --surface-3: #2a2824;
+  --surface-hover: #25231f;
+  --border: #2c2a26;
+  --border-strong: #3b3833;
+  --divider: #24221f;
+  --text: #ece8e1;
+  --text-2: #b5afa5;
+  --text-3: #837d74;
+  --text-inverse: #15130f;
+  --accent: #d6b37a;
+  --accent-strong: #e8c992;
+  --accent-soft: rgba(214, 179, 122, 0.13);
+  --accent-contrast: #1a1409;
+  --focus: rgba(214, 179, 122, 0.55);
+  --danger: #e5776c;
+  --danger-soft: rgba(229, 119, 108, 0.12);
+  --success: #93c26f;
+  --warning: #e0b050;
+  --info: #7fa9d8;
+  --cm: #c49ae0;
+  --cm-soft: rgba(176, 79, 216, 0.14);
+  --scrim: rgba(6, 5, 4, 0.62);
+  --shadow-1: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 6px 18px rgba(0, 0, 0, 0.38), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-3: 0 18px 50px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-board: 0 1px 2px rgba(0, 0, 0, 0.5), 0 12px 40px rgba(0, 0, 0, 0.45);
+
+  --note-yellow: #e9d77a;
+  --note-pink: #e3a7bf;
+  --note-blue: #9cc7e4;
+  --note-green: #b2d58f;
+  --note-chessmind: #cfb6e6;
+  --note-ink: #1f1c16;
+}
+
+/* ---- Light: warm paper ---- */
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f3f0e9;
+  --bg-sunken: #ebe7de;
+  --surface: #fcfbf8;
+  --surface-2: #f5f2ec;
+  --surface-3: #ebe6dc;
+  --surface-hover: #f0ece4;
+  --border: #e3ddd2;
+  --border-strong: #cfc7b9;
+  --divider: #ece7de;
+  --text: #1d1b17;
+  --text-2: #57524a;
+  --text-3: #8a8479;
+  --text-inverse: #fbfaf7;
+  --accent: #8d6621;
+  --accent-strong: #6f4f14;
+  --accent-soft: rgba(141, 102, 33, 0.1);
+  --accent-contrast: #fffdf8;
+  --focus: rgba(141, 102, 33, 0.45);
+  --danger: #b4382c;
+  --danger-soft: rgba(180, 56, 44, 0.08);
+  --success: #4c7d2a;
+  --warning: #a0700f;
+  --info: #2f6497;
+  --cm: #8a45b0;
+  --cm-soft: rgba(138, 69, 176, 0.09);
+  --scrim: rgba(40, 34, 24, 0.32);
+  --shadow-1: 0 1px 2px rgba(60, 45, 20, 0.07);
+  --shadow-2: 0 6px 18px rgba(60, 45, 20, 0.1), 0 1px 3px rgba(60, 45, 20, 0.08);
+  --shadow-3: 0 20px 50px rgba(60, 45, 20, 0.18), 0 2px 8px rgba(60, 45, 20, 0.1);
+  --shadow-board: 0 1px 2px rgba(60, 45, 20, 0.2), 0 12px 36px rgba(60, 45, 20, 0.16);
+
+  --note-yellow: #fbe995;
+  --note-pink: #f7c4d6;
+  --note-blue: #c3e1f5;
+  --note-green: #d3ebb8;
+  --note-chessmind: #e6d5f3;
+  --note-ink: #26221b;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-med: 0ms;
+    --dur-slow: 0ms;
+    --dur-piece: 0ms;
+  }
+}

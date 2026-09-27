@@ -1,0 +1,47 @@
+import { createContext, useContext } from 'react';
+import type { Chess, Move } from 'chess.js';
+import type { GameAction } from '../state/gameReducer';
+import type { Annotation, GameState } from '../types';
+import type { Orientation } from '../components/boardGeometry';
+import type { useEngine } from '../engine/useEngine';
+import type { useChessMind } from '../chessmind/useChessMind';
+import type { useSimulate } from '../simulate/useSimulate';
+import type { UiSettings } from '../ui/settings';
+import type { LayoutApi } from '../workspace/useLayout';
+
+/** Everything a panel may need. Panels read it with `useApp()` instead of receiving props. */
+export interface AppCtx {
+  state: GameState;
+  dispatch: (a: GameAction) => void;
+  chess: Chess;
+  fen: string;
+  annotation: Annotation;
+  lastMove?: Move;
+  /** UCI moves from the standard start (null for custom-FEN games). */
+  uciMoves: string[] | null;
+  orientation: Orientation;
+  flip: () => void;
+  playUci: (uci: string) => void;
+  engine: ReturnType<typeof useEngine>;
+  chessmind: ReturnType<typeof useChessMind>;
+  sim: ReturnType<typeof useSimulate>;
+  ui: UiSettings;
+  updateUi: (patch: Partial<UiSettings>) => void;
+  layout: LayoutApi;
+  /** Show a panel (placing it if hidden) and focus its tab. */
+  revealPanel: (id: string) => void;
+  toast: (message: string) => void;
+  openImport: () => void;
+  exportPgn: (text?: string) => void;
+  newGame: () => void;
+  openPalette: () => void;
+  openShortcuts: () => void;
+}
+
+export const AppContext = createContext<AppCtx | null>(null);
+
+export function useApp(): AppCtx {
+  const ctx = useContext(AppContext);
+  if (!ctx) throw new Error('useApp must be used inside <AppContext.Provider>');
+  return ctx;
+}
