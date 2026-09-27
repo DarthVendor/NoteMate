@@ -1,8 +1,11 @@
 // Builds a single-file page (CSS + JS inlined, no document skeleton) for publishing as an artifact.
 import { execSync } from 'node:child_process';
-import { readFileSync, writeFileSync, readdirSync, mkdirSync, statSync, openSync, readSync, closeSync, copyFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, mkdirSync, statSync, openSync, readSync, closeSync, copyFileSync, existsSync, cpSync, rmSync } from 'node:fs';
 
-const out = process.argv[2] ?? 'artifact/index.html';
+const args = process.argv.slice(2);
+const out = args.find((a) => !a.startsWith('--')) ?? 'artifact/index.html';
+// --no-full-engine leaves out the ~99 MB Stockfish Full chunks (artifact versions are capped at 256 MB in total).
+const fullEngine = !args.includes('--no-full-engine');
 execSync('npx vite build --base ./ --outDir dist-artifact', { stdio: 'inherit' });
 let html = readFileSync('dist-artifact/index.html', 'utf8');
 const assets = readdirSync('dist-artifact/assets');
@@ -28,7 +31,7 @@ for (const f of ['chunked-loader.js', 'stockfish-19-lite-single.js', 'stockfish-
 const PART_SIZE = 12 * 1024 * 1024;
 const outDir = out.replace(/\/[^/]+$/, '');
 mkdirSync(`${outDir}/engines`, { recursive: true });
-for (const name of ['stockfish-19-single']) {
+for (const name of fullEngine ? ['stockfish-19-single'] : []) {
   const src = `public/engines/${name}.wasm`;
   const size = statSync(src).size;
   const fd = openSync(src, 'r');
@@ -45,3 +48,39 @@ for (const name of ['stockfish-19-single']) {
   writeFileSync(`${outDir}/engines/${name}.wasm.parts.json`, JSON.stringify({ size, parts }));
   console.log(`split ${name}.wasm into ${parts.length} parts`);
 }
+
+// ChessMind models (already split into <= 14 MB .wasm parts by ChessMind's export_onnx.py).
+execSync('node scripts/copy-chessmind.mjs', { stdio: 'inherit' });
+execSync('node scripts/copy-ort.mjs', { stdio: 'inherit' });
+rmSync(`${outDir}/ort`, { recursive: true, force: true });
+cpSync('public/ort', `${outDir}/ort`, { recursive: true });
+for (const f of readdirSync(`${outDir}/ort`)) {
+  const size = statSync(`${outDir}/ort/${f}`).size;
+  if (size > 15 * 1024 * 1024) throw new Error(`ort/${f} is ${size} bytes, over the 15 MB artifact limit`);
+}
+if (existsSync('public/chessmind/models.json')) {
+  rmSync(`${outDir}/chessmind`, { recursive: true, force: true });
+  cpSync('public/chessmind', `${outDir}/chessmind`, { recursive: true });
+  const models = JSON.parse(readFileSync('public/chessmind/models.json', 'utf8'));
+  for (const m of models) {
+    for (const f of readdirSync(`${outDir}/chessmind/${m.id}`)) {
+      const size = statSync(`${outDir}/chessmind/${m.id}/${f}`).size;
+      if (size > 15 * 1024 * 1024) throw new Error(`chessmind/${m.id}/${f} is ${size} bytes, over the 15 MB artifact limit`);
+    }
+  }
+  console.log(`copied ChessMind models: ${models.map((m) => `${m.id} (${m.sizeMb} MB)`).join(', ')}`);
+}
+
+let total = 0;
+let count = 0;
+const walk = (d) => {
+  for (const f of readdirSync(d, { withFileTypes: true })) {
+    if (f.isDirectory()) walk(`${d}/${f.name}`);
+    else {
+      total += statSync(`${d}/${f.name}`).size;
+      count++;
+    }
+  }
+};
+walk(outDir);
+console.log(`artifact: ${count} files, ${(total / 1e6).toFixed(1)} MB${total > 256e6 ? ' (over the 256 MB artifact version limit; try --no-full-engine)' : ''}`);

@@ -91,7 +91,11 @@ export class EngineClient {
     });
   }
 
+  /** Raw output tap used by bestMove(). */
+  private tap: ((line: string) => void) | null = null;
+
   private handle(line: string) {
+    this.tap?.(line);
     for (const w of [...this.waiters]) {
       if (w.match(line)) {
         this.waiters.splice(this.waiters.indexOf(w), 1);
@@ -160,6 +164,43 @@ export class EngineClient {
     this.send(`position fen ${fen}`);
     this.send(depth > 0 ? `go depth ${depth}` : 'go infinite');
     return this.searchId;
+  }
+
+  /** Start a new game (clears the hash) and wait until the engine is ready. */
+  async newGame() {
+    this.send('ucinewgame');
+    await this.isReady();
+  }
+
+  /**
+   * One search with a time or node limit, for playing rather than analysing. Resolves with the best move
+   * (null when there is none) and the last principal line's score (side to move's point of view).
+   * Meant for a dedicated client: a running analysis is stopped first.
+   */
+  async bestMove(fen: string, limit: { movetime?: number; nodes?: number }, timeoutMs = 120000): Promise<{ move: string | null; cp?: number; mate?: number; depth?: number }> {
+    if (this.searching) {
+      const stopped = this.wait((l) => l.startsWith('bestmove'), 10000).catch(() => '');
+      this.stop();
+      await stopped;
+    }
+    const cap: { line?: EngineLine } = {};
+    this.tap = (l) => {
+      if (!l.startsWith('info ')) return;
+      const parsed = parseInfo(l);
+      if (parsed && parsed.multipv === 1) cap.line = parsed;
+    };
+    const done = this.wait((l) => l.startsWith('bestmove'), timeoutMs);
+    this.searching = true;
+    this.acceptingInfo = false;
+    this.send(`position fen ${fen}`);
+    this.send(limit.nodes ? `go nodes ${Math.max(1, Math.round(limit.nodes))}` : `go movetime ${Math.max(1, Math.round(limit.movetime ?? 100))}`);
+    try {
+      const line = await done;
+      const mv = line.split(/\s+/)[1];
+      return { move: mv && mv !== '(none)' && mv !== '0000' ? mv : null, cp: cap.line?.cp, mate: cap.line?.mate, depth: cap.line?.depth };
+    } finally {
+      this.tap = null;
+    }
   }
 
   stop() {

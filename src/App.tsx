@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { DEFAULT_POSITION } from 'chess.js';
 import { Board } from './components/Board';
 import { MoveList } from './components/MoveList';
 import { StickyNotes } from './components/StickyNotes';
@@ -7,9 +8,13 @@ import { PgnImport } from './components/PgnImport';
 import { EnginePanel } from './components/EnginePanel';
 import { EvalBar } from './components/EvalBar';
 import { useEngine } from './engine/useEngine';
+import { useChessMind } from './chessmind/useChessMind';
+import { ChessMindPanel } from './chessmind/ChessMindPanel';
 import { ROOT_ID, type Arrow, type Square } from './types';
 import type { Orientation } from './components/boardGeometry';
 import { useGame } from './state/useGame';
+import { useSimulate } from './simulate/useSimulate';
+import { SimulatePanel } from './simulate/SimulatePanel';
 import { toPgn } from './state/gameReducer';
 
 export default function App() {
@@ -21,6 +26,20 @@ export default function App() {
   const hasMoves = state.nodes[ROOT_ID].children.length > 0;
   const fen = chess.fen();
   const engine = useEngine(fen);
+  const standardStart = state.startFen.split(' ').slice(0, 4).join(' ') === DEFAULT_POSITION.split(' ').slice(0, 4).join(' ');
+  const uciMoves = useMemo(() => (standardStart ? chess.history({ verbose: true }).map((m) => m.lan) : null), [chess, standardStart]);
+  const chessmind = useChessMind(uciMoves, state.chat ?? [], dispatch);
+  const sim = useSimulate({ state, dispatch, cm: chessmind, engineSettings: engine.settings, engineAvailable: engine.available });
+  // Live overlay of the predicted moves (pinned ones are ordinary annotation arrows).
+  const pinnedCm = annotation.arrows.filter((a) => a.color === 'chessmind');
+  const cmMoves =
+    chessmind.settings.enabled && chessmind.settings.arrows && pinnedCm.length === 0 ? (chessmind.prediction?.moves ?? []) : [];
+  const chessmindArrows: Arrow[] = cmMoves.map((m) => ({
+    from: m.uci.slice(0, 2) as Square,
+    to: m.uci.slice(2, 4) as Square,
+    color: 'chessmind' as const,
+    opacity: 0.25 + 0.6 * (m.p / (cmMoves[0]?.p || 1)),
+  }));
 
   const engineArrows: Arrow[] = engine.settings.enabled
     ? engine.lines.slice(0, 1).flatMap((l) =>
@@ -52,8 +71,8 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [dispatch]);
 
-  const exportPgn = async () => {
-    const pgn = toPgn(state);
+  const exportPgn = async (text?: string) => {
+    const pgn = text ?? toPgn(state);
     try {
       await navigator.clipboard.writeText(pgn);
       setToast('PGN copied to clipboard');
@@ -74,7 +93,7 @@ export default function App() {
           <Board
           chess={chess}
           orientation={orientation}
-          arrows={[...engineArrows, ...annotation.arrows]}
+          arrows={[...chessmindArrows, ...engineArrows, ...annotation.arrows]}
           highlights={annotation.highlights}
           lastMove={lastMove}
           onMove={(from, to, promotion) => dispatch({ type: 'MAKE_MOVE', from, to, promotion })}
@@ -101,7 +120,7 @@ export default function App() {
           onFlip={flip}
           onClearShapes={() => dispatch({ type: 'CLEAR_SHAPES' })}
           onImport={() => setShowImport(true)}
-          onExport={exportPgn}
+          onExport={() => exportPgn()}
         />
         <EnginePanel
           fen={fen}
@@ -115,6 +134,8 @@ export default function App() {
           progress={engine.progress}
           onPlayUci={playUci}
         />
+        <ChessMindPanel cm={chessmind} state={state} dispatch={dispatch} chess={chess} fen={fen} uciMoves={uciMoves} onPlayUci={playUci} onFlip={flip} />
+        <SimulatePanel sim={sim} cm={chessmind} state={state} dispatch={dispatch} onExport={(pgn) => exportPgn(pgn)} />
         <MoveList state={state} dispatch={dispatch} />
       </section>
 

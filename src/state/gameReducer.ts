@@ -1,5 +1,5 @@
 import { Chess, DEFAULT_POSITION } from 'chess.js';
-import type { Annotation, Arrow, GameState, Highlight, MoveNode, Note, NoteColor, Square } from '../types';
+import type { Annotation, Arrow, ChatMessage, GameState, Highlight, MoveNode, Note, NoteColor, Square } from '../types';
 import { emptyAnnotation, ROOT_ID } from '../types';
 import { gameFromParsed, newId, parsePgn } from './pgn';
 
@@ -16,9 +16,24 @@ export type GameAction =
   | { type: 'TOGGLE_ARROW'; arrow: Arrow }
   | { type: 'TOGGLE_HIGHLIGHT'; highlight: Highlight }
   | { type: 'CLEAR_SHAPES' }
-  | { type: 'ADD_NOTE'; color: NoteColor }
+  | { type: 'ADD_NOTE'; color: NoteColor; text?: string; nodeId?: string; id?: string }
   | { type: 'UPDATE_NOTE'; id: string; text: string }
-  | { type: 'DELETE_NOTE'; id: string }
+  | { type: 'DELETE_NOTE'; id: string; nodeId?: string }
+  /** Set arrows on a node (default: the current one), replacing any on the same squares. */
+  | { type: 'ADD_ARROWS'; arrows: Arrow[]; nodeId?: string }
+  /**
+   * Insert a line of UCI moves as a branch after `fromId`, reusing existing nodes whose move matches.
+   * `newIds[i]` names the node created for move i. Lands on move `gotoIndex` (0 = fromId).
+   */
+  | { type: 'ADD_LINE'; fromId: string; moves: string[]; newIds: string[]; gotoIndex: number; notes?: { at: 'start' | 'end'; text: string; id: string; color: NoteColor }[] }
+  /**
+   * Always create a new child of `parentId` for a UCI move (even when a sibling has the same move), so a
+   * simulated game gets its own branch. `goto` moves the board there. No-op if the move is illegal.
+   */
+  | { type: 'APPEND_MOVE'; parentId: string; uci: string; id: string; goto?: boolean }
+  | { type: 'CHAT_APPEND'; messages: ChatMessage[] }
+  | { type: 'CHAT_PATCH'; id: string; patch: Partial<ChatMessage> }
+  | { type: 'CHAT_CLEAR' }
   | { type: 'LOAD_PGN'; pgn: string }
   | { type: 'NEW_GAME' }
   | { type: 'REPLACE'; state: GameState };
@@ -78,8 +93,42 @@ export function isMainLine(state: GameState, id: string): boolean {
   return true;
 }
 
-function withAnnotation(state: GameState, update: (a: Annotation) => Annotation): GameState {
-  const node = state.nodes[state.currentId];
+/**
+ * Node ids and SANs for a line of UCI moves played from `fromId`: existing children are reused
+ * when their move matches, otherwise `newIds[i]` is used. Null if a move is illegal.
+ */
+export function resolveLine(
+  state: GameState,
+  fromId: string,
+  moves: string[],
+  newIds: string[],
+): { ids: string[]; sans: string[]; created: boolean[] } | null {
+  if (!state.nodes[fromId]) return null;
+  const chess = positionAt(state, fromId);
+  const ids: string[] = [];
+  const sans: string[] = [];
+  const created: boolean[] = [];
+  let parent: MoveNode | undefined = state.nodes[fromId];
+  for (let i = 0; i < moves.length; i++) {
+    const uci = moves[i];
+    let san: string;
+    try {
+      san = chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] }).san;
+    } catch {
+      return null;
+    }
+    const existing: string | undefined = parent?.children.find((c) => state.nodes[c].san === san);
+    ids.push(existing ?? newIds[i]);
+    sans.push(san);
+    created.push(!existing);
+    parent = existing ? state.nodes[existing] : undefined;
+  }
+  return { ids, sans, created };
+}
+
+function withAnnotation(state: GameState, update: (a: Annotation) => Annotation, nodeId: string = state.currentId): GameState {
+  const node = state.nodes[nodeId];
+  if (!node) return state;
   const next = update(node.annotation ?? emptyAnnotation());
   const empty = next.arrows.length === 0 && next.highlights.length === 0 && next.notes.length === 0;
   const updated: MoveNode = { ...node };
@@ -180,16 +229,68 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     case 'CLEAR_SHAPES':
       return withAnnotation(state, (a) => ({ ...a, arrows: [], highlights: [] }));
     case 'ADD_NOTE': {
-      const note: Note = { id: newId(), text: '', color: action.color, createdAt: Date.now() };
-      return withAnnotation(state, (a) => ({ ...a, notes: [...a.notes, note] }));
+      const note: Note = { id: action.id ?? newId(), text: action.text ?? '', color: action.color, createdAt: Date.now() };
+      return withAnnotation(state, (a) => ({ ...a, notes: [...a.notes, note] }), action.nodeId);
     }
+    case 'ADD_ARROWS':
+      return withAnnotation(
+        state,
+        (a) => ({
+          ...a,
+          arrows: [...a.arrows.filter((x) => !action.arrows.some((y) => y.from === x.from && y.to === x.to)), ...action.arrows],
+        }),
+        action.nodeId,
+      );
+    case 'ADD_LINE': {
+      const r = resolveLine(state, action.fromId, action.moves, action.newIds);
+      if (!r) return state;
+      const nodes = { ...state.nodes };
+      let parentId = action.fromId;
+      r.ids.forEach((id, i) => {
+        if (r.created[i]) {
+          nodes[id] = { id, san: r.sans[i], parent: parentId, children: [] };
+          nodes[parentId] = { ...nodes[parentId], children: [...nodes[parentId].children, id] };
+        }
+        parentId = id;
+      });
+      let next: GameState = { ...state, nodes };
+      for (const n of action.notes ?? []) {
+        const nodeId = n.at === 'start' || r.ids.length === 0 ? action.fromId : r.ids[r.ids.length - 1];
+        next = gameReducer(next, { type: 'ADD_NOTE', color: n.color, text: n.text, id: n.id, nodeId });
+      }
+      const target = action.gotoIndex <= 0 ? action.fromId : r.ids[Math.min(action.gotoIndex, r.ids.length) - 1];
+      return { ...next, currentId: target };
+    }
+    case 'APPEND_MOVE': {
+      const parent = state.nodes[action.parentId];
+      if (!parent || state.nodes[action.id]) return state;
+      let san: string;
+      try {
+        san = positionAt(state, parent.id).move({ from: action.uci.slice(0, 2), to: action.uci.slice(2, 4), promotion: action.uci[4] }).san;
+      } catch {
+        return state;
+      }
+      const node: MoveNode = { id: action.id, san, parent: parent.id, children: [] };
+      return {
+        ...state,
+        nodes: { ...state.nodes, [node.id]: node, [parent.id]: { ...parent, children: [...parent.children, node.id] } },
+        currentId: action.goto ? node.id : state.currentId,
+      };
+    }
+    case 'CHAT_APPEND':
+      return { ...state, chat: [...(state.chat ?? []), ...action.messages] };
+    case 'CHAT_PATCH':
+      if (!state.chat?.some((m) => m.id === action.id)) return state;
+      return { ...state, chat: state.chat.map((m) => (m.id === action.id ? { ...m, ...action.patch } : m)) };
+    case 'CHAT_CLEAR':
+      return { ...state, chat: [] };
     case 'UPDATE_NOTE':
       return withAnnotation(state, (a) => ({
         ...a,
         notes: a.notes.map((n) => (n.id === action.id ? { ...n, text: action.text } : n)),
       }));
     case 'DELETE_NOTE':
-      return withAnnotation(state, (a) => ({ ...a, notes: a.notes.filter((n) => n.id !== action.id) }));
+      return withAnnotation(state, (a) => ({ ...a, notes: a.notes.filter((n) => n.id !== action.id) }), action.nodeId);
     case 'LOAD_PGN': {
       try {
         return gameFromParsed(parsePgn(action.pgn));

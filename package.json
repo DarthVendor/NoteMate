@@ -9,11 +9,12 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "engines": "node scripts/copy-engines.mjs",
-    "predev": "node scripts/copy-engines.mjs",
-    "prebuild": "node scripts/copy-engines.mjs",
+    "predev": "node scripts/copy-engines.mjs && node scripts/copy-chessmind.mjs && node scripts/copy-ort.mjs",
+    "prebuild": "node scripts/copy-engines.mjs && node scripts/copy-chessmind.mjs && node scripts/copy-ort.mjs",
     "serve": "vite preview --port 4173 --strictPort",
     "serve:engines": "node scripts/engine-server.mjs 4174",
-    "host": "node scripts/copy-engines.mjs && vite build && node scripts/host.mjs"
+    "host": "node scripts/copy-engines.mjs && node scripts/copy-chessmind.mjs && node scripts/copy-ort.mjs && vite build && node scripts/host.mjs",
+    "chessmind": "node scripts/copy-chessmind.mjs"
   },
   "dependencies": {
     "chess.js": "^1.4.0",
@@ -26,6 +27,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
+    "onnxruntime-web": "1.30.0",
     "oxlint": "^1.81.0",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"

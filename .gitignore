@@ -25,4 +25,7 @@ dist-ssr
 
 # Stockfish builds are copied from node_modules by scripts/copy-engines.mjs
 public/engines
+# ChessMind ONNX exports are copied in by scripts/copy-chessmind.mjs
+public/chessmind
 dist-artifact
+public/ort

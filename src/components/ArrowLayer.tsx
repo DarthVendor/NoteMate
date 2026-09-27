@@ -7,6 +7,7 @@ export const SHAPE_COLORS: Record<ShapeColor, string> = {
   blue: '#003088',
   yellow: '#e68f00',
   engine: '#4a90e2',
+  chessmind: '#b04fd8',
 };
 
 interface Props {
@@ -45,7 +46,7 @@ function ArrowShape({ arrow, orientation, faded }: { arrow: Arrow; orientation: 
   ].join(' ');
   const color = SHAPE_COLORS[arrow.color];
   return (
-    <g opacity={faded ? 0.5 : arrow.color === 'engine' ? 0.6 : 0.85}>
+    <g opacity={faded ? 0.5 : (arrow.opacity ?? (arrow.color === 'engine' ? 0.6 : 0.85))}>
       <line x1={sx} y1={sy} x2={ex} y2={ey} stroke={color} strokeWidth={0.16} strokeLinecap="round" />
       <polygon points={head} fill={color} />
     </g>
@@ -71,7 +72,7 @@ export function ArrowLayer({ arrows, highlights, preview, orientation }: Props) 
         );
       })}
       {arrows.map((a) => (
-        <ArrowShape key={`${a.from}${a.to}`} arrow={a} orientation={orientation} />
+        <ArrowShape key={`${a.color}${a.from}${a.to}`} arrow={a} orientation={orientation} />
       ))}
       {preview && preview.from !== preview.to && <ArrowShape arrow={preview} orientation={orientation} faded />}
     </svg>

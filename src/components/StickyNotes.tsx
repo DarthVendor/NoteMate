@@ -41,6 +41,7 @@ export function StickyNotes({ state, notes, onAdd, onUpdate, onDelete, onGoto }:
         {notes.length === 0 && <p className="hint">No notes on this position yet. Click a + to add a sticky.</p>}
         {notes.map((n, i) => (
           <div key={n.id} className={`sticky note-${n.color}`} style={{ '--tilt': `${((i % 3) - 1) * 1.2}deg` } as React.CSSProperties}>
+            {n.color === 'chessmind' && <span className="sticky-badge">ChessMind</span>}
             <button className="sticky-delete" title="Delete note" onClick={() => onDelete(n.id)}>
               ×
             </button>
