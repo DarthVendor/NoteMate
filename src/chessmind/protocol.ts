@@ -3,6 +3,8 @@ import type { DialoguePart, DialogueTurn } from './tokenizer';
 /** Default think budget: tokens of hidden reasoning before <|end_think|> is forced (as chat() in generate.py).
  * Training traces fit in it (engine-think max ~410 tokens). */
 export const DEFAULT_MAX_THINK_TOKENS = 640;
+/** Move lines in chat answers are greedy (as chat() in generate.py, line_temperature=0); temperature applies to text. */
+export const DEFAULT_LINE_TEMPERATURE = 0;
 
 /**
  * onnxruntime-web CPU build, served from the app's own origin under ort/ (scripts/copy-ort.mjs). The artifact host
@@ -58,8 +60,12 @@ export type ToWorker =
       context?: string[];
       /** Answer budget (the think budget comes on top). */
       maxTokens: number;
+      /** Text sampling temperature (words only). */
       temperature: number;
       topK: number;
+      /** Temperature of move lines, from <|line|> through <|end_line|> (the moves and where the line stops), in the
+       * answer and inside the think. Default DEFAULT_LINE_TEMPERATURE = 0: greedy, the top legal choice. */
+      lineTemperature?: number;
       /** Hidden reasoning (models whose tokenizer has <|end_think|>): 'on' forces <|think|> first, 'off' forbids it,
        * 'auto' lets the model choose. Ignored by other models. */
       think?: ThinkMode;

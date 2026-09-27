@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ChessMindWorker from './worker.ts?worker&inline';
-import { DEFAULT_MAX_THINK_TOKENS, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type ThinkMode, type ToWorker } from './protocol';
+import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type ThinkMode, type ToWorker } from './protocol';
 import { splitThink, type DialogueTurn } from './tokenizer';
 import type { ChatMessage } from '../types';
 import type { GameAction } from '../state/gameReducer';
@@ -32,6 +32,8 @@ export interface ChessMindSettings {
   contextPlies: 'full' | 8 | 16 | 32;
   /** Hidden reasoning before the answer (models that can think): always, the model's choice, or never. */
   think: ThinkMode;
+  /** Chat text sampling temperature; move lines are always greedy (DEFAULT_LINE_TEMPERATURE). */
+  temperature: number;
 }
 
 export interface PickResult {
@@ -46,7 +48,7 @@ export type ChessMindStatus = 'off' | 'loading' | 'ready' | 'error';
 const STORAGE_KEY = 'notemate.chessmind.v1';
 /** Plies of history the simulator gives a board-embedding model (see pick). */
 const SIM_CONTEXT_PLIES = 16;
-const DEFAULTS: ChessMindSettings = { enabled: false, modelId: '', backend: 'auto', arrows: true, aboutPosition: false, sendMoves: true, contextPlies: 'full', think: 'on' };
+const DEFAULTS: ChessMindSettings = { enabled: false, modelId: '', backend: 'auto', arrows: true, aboutPosition: false, sendMoves: true, contextPlies: 'full', think: 'on', temperature: 0.8 };
 /** Earlier chat turns sent with a question. 0: the graph has no KV cache, so every token re-runs the whole
  * sequence and each earlier exchange (~60 tokens) roughly doubles per-token latency. */
 const HISTORY_TURNS = 0;
@@ -262,9 +264,9 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
           { id: answerId, role: 'assistant', kind: 'model', parts: [], originId: opts.originId, fen: opts.fen },
         ],
       });
-      worker.postMessage({ type: 'chat', id, history, prompt: text, fen: opts.fen, context: opts.context, maxTokens: CHAT_MAX_TOKENS, temperature: 0.8, topK: 50, think: settings.think, maxThinkTokens: CHAT_MAX_THINK_TOKENS } satisfies ToWorker);
+      worker.postMessage({ type: 'chat', id, history, prompt: text, fen: opts.fen, context: opts.context, maxTokens: CHAT_MAX_TOKENS, temperature: settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: settings.think, maxThinkTokens: CHAT_MAX_THINK_TOKENS } satisfies ToWorker);
     },
-    [chat, status, dispatch, settings.think],
+    [chat, status, dispatch, settings.think, settings.temperature],
   );
 
   /** Top moves for the position after `movesUci` plus a short explanation from the model. */

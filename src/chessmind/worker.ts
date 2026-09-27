@@ -8,7 +8,7 @@
 import { Chess } from 'chess.js';
 import { ChessTokenizer, type DialoguePart, type DialogueTurn } from './tokenizer';
 import { BoardTracker, encodeGameWithBoards, N_SLOTS, type BoardRow } from './boards';
-import { DEFAULT_MAX_THINK_TOKENS, ORT_DIR, ORT_SCRIPT_FILE, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type ToWorker } from './protocol';
+import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, ORT_DIR, ORT_SCRIPT_FILE, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type ToWorker } from './protocol';
 
 // Minimal typing of the onnxruntime-web globals used here.
 interface OrtTensor { data: Float32Array | BigInt64Array; dims: readonly number[]; dispose?: () => void }
@@ -402,6 +402,8 @@ interface GenOptions {
   maxTokens: number;
   temperature: number;
   topK: number;
+  /** Temperature for the tokens after a generated <|line|> through its <|end_line|> (unset: `temperature`). */
+  lineTemperature?: number;
   allowed: (out: number[]) => number[];
   stops: Set<number>;
   render: (out: number[]) => DialoguePart[];
@@ -412,6 +414,10 @@ interface GenOptions {
 async function generate(o: GenOptions) {
   let { ids, rows } = trimPrefix(o.prefix, o.prefixRows, o.maxTokens);
   const out: number[] = [];
+  // Lines (greedy by default in chat): from a generated <|line|> through its <|end_line|>, as generate.py's line_temperature
+  const lineId = o.lineTemperature !== undefined && tok ? tok.lineId : -1;
+  const endLineId = o.lineTemperature !== undefined && tok ? tok.endLineId : -1;
+  let inLine = false;
   let genMs = 0;
   let prefillMs: number | undefined;
   for (let step = 0; step < o.maxTokens; step++) {
@@ -424,8 +430,11 @@ async function generate(o: GenOptions) {
     const dt = performance.now() - t0;
     if (step === 0) prefillMs = dt;
     genMs += dt;
-    const next = sample(logits, o.allowed(out), o.temperature, o.topK);
+    const temperature = inLine && o.lineTemperature !== undefined ? o.lineTemperature : o.temperature;
+    const next = sample(logits, o.allowed(out), temperature, o.topK);
     out.push(next);
+    if (next === lineId) inLine = true;
+    else if (next === endLineId) inLine = false;
     ids = [...ids, next];
     if (rows && o.nextRow) rows = [...rows, o.nextRow(next)];
     const done = o.stops.has(next) || step === o.maxTokens - 1;
@@ -461,6 +470,7 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
     maxTokens: req.maxTokens + (thinking ? maxThink + 2 : 0),
     temperature: req.temperature,
     topK: req.topK,
+    lineTemperature: req.lineTemperature ?? DEFAULT_LINE_TEMPERATURE,
     allowed: (out) => constraint.allowed(out),
     stops: new Set([t.eosId, t.userId]),
     render: (out) => {
