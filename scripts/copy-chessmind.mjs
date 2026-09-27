@@ -7,8 +7,9 @@ import { join, resolve } from 'node:path';
 const src = resolve(process.env.CHESSMIND_EXPORT ?? '../ChessMind/export/onnx');
 const dest = 'public/chessmind';
 // Listed first = default in the app's model selector.
-const ORDER = ['restart-v3-250m-s50k', 'medium-100m-live-vast', 'exp-small-board', 'exp-small'];
+const ORDER = ['restart-v3-250m-s90k', 'restart-v3-250m-s50k', 'medium-100m-live-vast', 'exp-small-board', 'exp-small'];
 const DESCRIPTIONS = {
+  'restart-v3-250m-s90k': '255M parameters, board embedding, tokenizer v3, step 90,000 of the restart run. Best so far: 43% top-1 (45% among legal moves), CPL 56, and reads written moves into lines (51/60). Large download (275 MB). int8.',
   'restart-v3-250m-s50k': '255M parameters, board embedding, tokenizer v3, step 50,000 of the restart run. Best chess model so far (44% top-1, 99% legal). Large download (275 MB). int8.',
   'medium-100m-live-vast': '105M parameters (d_model 1024), trained live on games, commentary and dialogues. int8.',
   'exp-small': '31M parameter development model (d_model 512). Loads fast. int8.',
