@@ -1,8 +1,8 @@
 import type { DialoguePart, DialogueTurn } from './tokenizer';
 
 /** Default think budget: tokens of hidden reasoning before <|end_think|> is forced (as chat() in generate.py).
- * Training traces fit in it (engine-think max ~410 tokens). */
-export const DEFAULT_MAX_THINK_TOKENS = 640;
+ * Training thinks run from ~50 to ~2,000 tokens; a whole training example fits the 2,560-token context. */
+export const DEFAULT_MAX_THINK_TOKENS = 2560;
 /** Move lines in chat answers are greedy (as chat() in generate.py, line_temperature=0); temperature applies to text. */
 export const DEFAULT_LINE_TEMPERATURE = 0;
 

@@ -53,8 +53,8 @@ const DEFAULTS: ChessMindSettings = { enabled: false, modelId: '', backend: 'aut
  * sequence and each earlier exchange (~60 tokens) roughly doubles per-token latency. */
 const HISTORY_TURNS = 0;
 export const CHAT_MAX_TOKENS = 60;
-/** Budget of the hidden reasoning (on top of CHAT_MAX_TOKENS). Training thinks are ~220 tokens (p90 ~290, max ~410);
- * the close is forced gracefully at the budget. No KV cache: every token re-runs the whole sequence. */
+/** Budget of the hidden reasoning (on top of CHAT_MAX_TOKENS; the worker shrinks it to what the model's context leaves).
+ * Training thinks run from ~50 to ~2,000 tokens; the close is forced gracefully at the budget. */
 export const CHAT_MAX_THINK_TOKENS = DEFAULT_MAX_THINK_TOKENS;
 
 function loadSettings(): ChessMindSettings {

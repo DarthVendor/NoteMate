@@ -7,6 +7,7 @@
 import { useId, useState } from 'react';
 import { Chess } from 'chess.js';
 import type { ChatLeafPart } from '../types';
+import { DEFAULT_MAX_THINK_TOKENS } from './protocol';
 import './ThinkingBlock.css';
 
 interface Props {
@@ -21,6 +22,8 @@ interface Props {
   startFen?: string;
   /** Full FEN for a snapshot FEN (which has no move number / castling), when the caller knows the position. */
   resolveFen?: (fen: string) => string;
+  /** The think budget, shown with the live token count while it streams. */
+  budget?: number;
 }
 
 /** SAN of a UCI line from `fen`, with move numbers ("4...d5 5.exd5 Nxd5"); unparsable moves stay UCI. */
@@ -51,7 +54,7 @@ function sanLine(fen: string | undefined, moves: string[]): string {
 
 const sideOf = (fen: string) => (fen.split(' ')[1] === 'b' ? 'Black' : 'White');
 
-export function ThinkingBlock({ parts, open, tokens, done, startFen, resolveFen }: Props) {
+export function ThinkingBlock({ parts, open, tokens, done, startFen, resolveFen, budget = DEFAULT_MAX_THINK_TOKENS }: Props) {
   const [expanded, setExpanded] = useState(false);
   const bodyId = useId();
   const streaming = !!open && !done;
@@ -91,7 +94,11 @@ export function ThinkingBlock({ parts, open, tokens, done, startFen, resolveFen 
             <i />
           </span>
         )}
-        {streaming && tokens !== undefined && tokens > 0 && <span className="cm-think-count">{tokens}</span>}
+        {streaming && (
+          <span className="cm-think-count" aria-live="off" title="Tokens of reasoning so far / the think budget">
+            {tokens ?? 0} / {budget} tokens
+          </span>
+        )}
       </button>
       {expanded && canExpand && (
         <div className="cm-think-body" id={bodyId}>

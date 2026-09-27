@@ -458,7 +458,9 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
   const { start, positions } = dialoguePosition(turns);
   const mode = req.think ?? 'auto';
   const thinking = t.supportsThinking && mode !== 'off';
-  const maxThink = req.maxThinkTokens ?? DEFAULT_MAX_THINK_TOKENS;
+  // The think fits the context: what the prompt and the answer leave (a quarter of it at least), as chat() in generate.py
+  const room = manifest!.max_seq_len - prefix.length - req.maxTokens - 3;
+  const maxThink = Math.max(0, Math.min(req.maxThinkTokens ?? DEFAULT_MAX_THINK_TOKENS, Math.max(room, Math.floor((manifest!.max_seq_len - req.maxTokens) / 4))));
   const constraint = new LineConstraint(t, start, positions, mode === 'on' ? true : mode === 'off' ? false : null, maxThink);
   const tracker = manifest!.boards ? new BoardTracker(t) : null;
   const endThink = t.endThinkId;
