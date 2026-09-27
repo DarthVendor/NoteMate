@@ -44,6 +44,8 @@ export interface PickResult {
 export type ChessMindStatus = 'off' | 'loading' | 'ready' | 'error';
 
 const STORAGE_KEY = 'notemate.chessmind.v1';
+/** Plies of history the simulator gives a board-embedding model (see pick). */
+const SIM_CONTEXT_PLIES = 16;
 const DEFAULTS: ChessMindSettings = { enabled: false, modelId: '', backend: 'auto', arrows: true, aboutPosition: false, sendMoves: true, contextPlies: 'full', think: 'on' };
 /** Earlier chat turns sent with a question. 0: the graph has no KV cache, so every token re-runs the whole
  * sequence and each earlier exchange (~60 tokens) roughly doubles per-token latency. */
@@ -224,10 +226,14 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
       const id = ++reqId.current;
       return new Promise<PickResult>((resolve, reject) => {
         picks.current.set(id, { resolve, reject });
-        worker.postMessage({ type: 'pick', id, moves: movesUci, temperature, contextPlies } satisfies ToWorker);
+        // The graph has no KV cache, so a full-history pick costs O(plies) per move and games got slower and
+        // slower (0.5 s -> 3 s by ply 50 for the 250M model). Board models barely use history beyond a few plies
+        // (probe: 44.2% top-1 with the full game vs 43.9% with 4 plies), so the simulator caps it at 16.
+        const simContext = info?.manifest.boards ? Math.min(contextPlies ?? SIM_CONTEXT_PLIES, SIM_CONTEXT_PLIES) : contextPlies;
+        worker.postMessage({ type: 'pick', id, moves: movesUci, temperature, contextPlies: simContext } satisfies ToWorker);
       });
     },
-    [status, contextPlies],
+    [status, contextPlies, info?.manifest.boards],
   );
 
   /** Send a question to the model; the answer streams into a new assistant message. */

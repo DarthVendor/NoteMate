@@ -39,11 +39,14 @@ export default function App() {
 
   const hasMoves = state.nodes[ROOT_ID].children.length > 0;
   const fen = chess.fen();
-  const engine = useEngine(fen);
+  // Simulate drives its own engine; the analysis engine pauses while a simulation is active (see useEngine).
+  const [simActive, setSimActive] = useState(false);
+  const engine = useEngine(fen, simActive);
   const standardStart = state.startFen.split(' ').slice(0, 4).join(' ') === DEFAULT_POSITION.split(' ').slice(0, 4).join(' ');
   const uciMoves = useMemo(() => (standardStart ? chess.history({ verbose: true }).map((m) => m.lan) : null), [chess, standardStart]);
   const chessmind = useChessMind(uciMoves, state.chat ?? [], dispatch);
   const sim = useSimulate({ state, dispatch, cm: chessmind, engineSettings: engine.settings, engineAvailable: engine.available });
+  useEffect(() => setSimActive(sim.phase === 'loading' || sim.phase === 'running' || sim.phase === 'paused'), [sim.phase]);
 
   const playUci = useCallback(
     (uci: string) => dispatch({ type: 'MAKE_MOVE', from: uci.slice(0, 2) as Square, to: uci.slice(2, 4) as Square, promotion: uci[4] as 'q' | 'r' | 'b' | 'n' | undefined }),

@@ -16,7 +16,11 @@ function loadSettings(): EngineSettings {
   return DEFAULT_ENGINE_SETTINGS;
 }
 
-export function useEngine(fen: string) {
+/**
+ * The analysis engine for the current position. ``paused`` (e.g. while Simulate plays a game) stops the search
+ * and does not restart it on position changes, so the analysis does not compete with the simulation for CPU.
+ */
+export function useEngine(fen: string, paused = false) {
   const [settings, setSettings] = useState<EngineSettings>(loadSettings);
   const [status, setStatus] = useState<EngineStatus>('off');
   const [engineName, setEngineName] = useState('');
@@ -107,19 +111,31 @@ export function useEngine(fen: string) {
     };
   }, [url, remote]);
 
-  // Push options and (re)start analysis whenever the position or search settings change.
+  // Push options only when they change: re-sending Threads / Hash respawns the search threads and reallocates the
+  // hash table, which on every position change (Simulate, stepping through a game) pegged every CPU core.
   useEffect(() => {
     const client = clientRef.current;
     if (!client || status !== 'ready') return;
+    client.setOption('Threads', settings.threads);
+    client.setOption('Hash', settings.hashMb);
+    client.setOption('MultiPV', settings.multiPv);
+  }, [status, settings.threads, settings.hashMb, settings.multiPv]);
+
+  // (Re)start analysis whenever the position or search depth changes; stop it while paused.
+  useEffect(() => {
+    const client = clientRef.current;
+    if (!client || status !== 'ready') return;
+    if (paused) {
+      client.stop();
+      setLines([]);
+      return;
+    }
     const timer = setTimeout(() => {
-      client.setOption('Threads', settings.threads);
-      client.setOption('Hash', settings.hashMb);
-      client.setOption('MultiPV', settings.multiPv);
       setLines([]);
       activeSearch.current = client.analyse(fen, settings.depth);
     }, 120);
     return () => clearTimeout(timer);
-  }, [fen, status, settings.threads, settings.hashMb, settings.multiPv, settings.depth]);
+  }, [fen, status, paused, settings.threads, settings.hashMb, settings.multiPv, settings.depth]);
 
-  return { settings, update, status, engineName, error, lines, available, progress };
+  return { settings, update, status, engineName, error, lines, available, progress, paused };
 }
