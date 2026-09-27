@@ -1,0 +1,111 @@
+/*
+ * Hidden reasoning of a ChessMind answer (format-4 models: `<|think|> ... <|end_think|>` before the answer).
+ * Collapsed by default to a muted header ("Thinking…" while it streams, "Thought for N tokens" once closed);
+ * expanding shows its text and its lines as SAN. The lines are display-only: they are never inserted into the
+ * move tree or drawn on the board (only answer parts do that).
+ */
+import { useId, useState } from 'react';
+import { Chess } from 'chess.js';
+import type { ChatLeafPart } from '../types';
+import './ThinkingBlock.css';
+
+interface Props {
+  parts: ChatLeafPart[];
+  /** No <|end_think|> yet. */
+  open?: boolean;
+  /** Tokens generated inside the think. */
+  tokens?: number;
+  /** The message is finished (an open think of a finished message was stopped). */
+  done?: boolean;
+  /** Where lines start before any snapshot inside the think (the question's FEN; undefined = initial position). */
+  startFen?: string;
+  /** Full FEN for a snapshot FEN (which has no move number / castling), when the caller knows the position. */
+  resolveFen?: (fen: string) => string;
+}
+
+/** SAN of a UCI line from `fen`, with move numbers ("4...d5 5.exd5 Nxd5"); unparsable moves stay UCI. */
+function sanLine(fen: string | undefined, moves: string[]): string {
+  let c: Chess;
+  try {
+    c = new Chess(fen);
+  } catch {
+    return moves.join(' ');
+  }
+  const out: string[] = [];
+  let broken = false;
+  moves.forEach((uci, i) => {
+    const no = c.moveNumber();
+    const white = c.turn() === 'w';
+    let san = uci;
+    if (!broken) {
+      try {
+        san = c.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] }).san;
+      } catch {
+        broken = true;
+      }
+    }
+    out.push(broken ? uci : white ? `${no}.${san}` : i === 0 ? `${no}...${san}` : san);
+  });
+  return out.join(' ');
+}
+
+const sideOf = (fen: string) => (fen.split(' ')[1] === 'b' ? 'Black' : 'White');
+
+export function ThinkingBlock({ parts, open, tokens, done, startFen, resolveFen }: Props) {
+  const [expanded, setExpanded] = useState(false);
+  const bodyId = useId();
+  const streaming = !!open && !done;
+  const empty = parts.length === 0;
+  let label: string;
+  if (streaming) label = 'Thinking';
+  else if (open) label = 'Thinking stopped';
+  else if (empty) label = 'Skipped thinking';
+  else if (tokens !== undefined) label = `Thought for ${tokens} token${tokens === 1 ? '' : 's'}`;
+  else label = 'Reasoning';
+  const canExpand = !empty;
+
+  // Lines start from the latest snapshot inside the think, else from startFen.
+  const lineFens: (string | undefined)[] = [];
+  parts.reduce((f, p) => {
+    lineFens.push(f);
+    return p.kind === 'fen' ? (resolveFen?.(p.fen) ?? p.fen) : f;
+  }, startFen);
+  return (
+    <div className={`cm-think ${streaming ? 'is-streaming' : ''} ${expanded ? 'is-expanded' : ''}`} data-testid="chessmind-think">
+      <button
+        type="button"
+        className="cm-think-head"
+        aria-expanded={canExpand ? expanded : undefined}
+        aria-controls={canExpand ? bodyId : undefined}
+        disabled={!canExpand}
+        onClick={() => setExpanded((e) => !e)}
+      >
+        <span className="cm-think-chevron" aria-hidden="true">
+          <svg viewBox="0 0 16 16" width="10" height="10"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </span>
+        <span className="cm-think-label">{label}</span>
+        {streaming && (
+          <span className="cm-think-dots" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+        )}
+        {streaming && tokens !== undefined && tokens > 0 && <span className="cm-think-count">{tokens}</span>}
+      </button>
+      {expanded && canExpand && (
+        <div className="cm-think-body" id={bodyId}>
+          {parts.map((p, i) => {
+            if (p.kind === 'text') return <p key={i} className="cm-think-text">{p.text}</p>;
+            if (p.kind === 'fen') return <p key={i} className="cm-think-fen">position · {sideOf(p.fen)} to move</p>;
+            return (
+              <p key={i} className="cm-think-line">
+                {p.moves.length ? sanLine(lineFens[i], p.moves) : '(empty line)'}
+              </p>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}

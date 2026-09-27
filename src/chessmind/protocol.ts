@@ -10,6 +10,7 @@ export const ORT_DIR = 'ort/';
 export const ORT_SCRIPT_FILE = 'ort.wasm.min.js';
 
 export type Backend = 'auto' | 'wasm' | 'webgpu';
+export type ThinkMode = 'auto' | 'on' | 'off';
 
 /** Contents of <model dir>/model.json written by ChessMind's scripts/export_onnx.py. */
 export interface ModelManifest {
@@ -24,7 +25,7 @@ export interface ModelManifest {
   boards: boolean;
   /** Trained on per-side game instances: game prompts start `<|bos|> <|game|> <side to move>`. */
   perspective_games?: boolean;
-  /** Text tokenizer format (2 = GPT-2 split; 3 = chess-notation split + prefix space). */
+  /** Text tokenizer format (2 = GPT-2 split; 3 = chess-notation split + prefix space; 4 = 3 + <|end_think|>). */
   tokenizer_format?: number;
   quant: string;
   inputs: string[];
@@ -51,9 +52,15 @@ export type ToWorker =
       fen?: string;
       /** Game moves (UCI from the start) appended to the question as a <|line|> so the model sees the position. */
       context?: string[];
+      /** Answer budget (the think budget comes on top). */
       maxTokens: number;
       temperature: number;
       topK: number;
+      /** Hidden reasoning (models whose tokenizer has <|end_think|>): 'on' forces <|think|> first, 'off' forbids it,
+       * 'auto' lets the model choose. Ignored by other models. */
+      think?: ThinkMode;
+      /** Most tokens inside <|think|> ... <|end_think|> before the close is forced. */
+      maxThinkTokens?: number;
     }
   | { type: 'explain'; id: number; moves: string[]; maxTokens: number; temperature: number; topK: number; top: number; contextPlies: number | null }
   | { type: 'stop'; id: number }
@@ -62,7 +69,7 @@ export type ToWorker =
 
 export type FromWorker =
   | { type: 'progress'; loaded: number; total: number; phase: 'download' | 'compile' }
-  | { type: 'ready'; manifest: ModelManifest; backend: string; loadMs: number; cached: boolean; hasText: boolean }
+  | { type: 'ready'; manifest: ModelManifest; backend: string; loadMs: number; cached: boolean; hasText: boolean; thinking: boolean }
   | { type: 'prediction'; id: number; moves: MovePrediction[]; ms: number; tokens: number }
   | { type: 'chat-update'; id: number; parts: DialoguePart[]; tokens: number; msPerToken: number; done: boolean; stopped?: boolean; prefillMs?: number; predictions?: MovePrediction[] }
   | { type: 'picked'; id: number; uci: string | null; p: number; ms: number; tokens: number }

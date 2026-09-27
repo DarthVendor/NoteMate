@@ -55,7 +55,12 @@ export interface MoveNode {
 export const ROOT_ID = 'root';
 
 /** One part of a ChessMind chat message: text, a line of UCI moves, or a board snapshot. */
-export type ChatPart = { kind: 'text'; text: string } | { kind: 'line'; moves: string[] } | { kind: 'fen'; fen: string };
+export type ChatLeafPart = { kind: 'text'; text: string } | { kind: 'line'; moves: string[] } | { kind: 'fen'; fen: string };
+/** ...or (first part of an assistant answer, format-4 models) hidden reasoning: `<|think|> parts <|end_think|>`. */
+export type ChatPart =
+  | ChatLeafPart
+  /** `open`: no <|end_think|> yet (streaming); `tokens`: ids generated inside the think (both set by the worker). */
+  | { kind: 'think'; parts: ChatLeafPart[]; open?: boolean; tokens?: number };
 
 /** Where an answer's line was inserted into the move tree. */
 export interface ChatLineState {

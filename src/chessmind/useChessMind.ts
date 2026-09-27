@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ChessMindWorker from './worker.ts?worker&inline';
-import type { Backend, FromWorker, ModelManifest, MovePrediction, ToWorker } from './protocol';
-import type { DialogueTurn } from './tokenizer';
+import type { Backend, FromWorker, ModelManifest, MovePrediction, ThinkMode, ToWorker } from './protocol';
+import { splitThink, type DialogueTurn } from './tokenizer';
 import type { ChatMessage } from '../types';
 import type { GameAction } from '../state/gameReducer';
 import { newId } from '../state/pgn';
@@ -30,6 +30,8 @@ export interface ChessMindSettings {
   sendMoves: boolean;
   /** Board-embedding models: moves fed for predictions ('full' or the last N plies; the board carries the rest). */
   contextPlies: 'full' | 8 | 16 | 32;
+  /** Hidden reasoning before the answer (models that can think): always, the model's choice, or never. */
+  think: ThinkMode;
 }
 
 export interface PickResult {
@@ -42,11 +44,14 @@ export interface PickResult {
 export type ChessMindStatus = 'off' | 'loading' | 'ready' | 'error';
 
 const STORAGE_KEY = 'notemate.chessmind.v1';
-const DEFAULTS: ChessMindSettings = { enabled: false, modelId: '', backend: 'auto', arrows: true, aboutPosition: false, sendMoves: true, contextPlies: 'full' };
+const DEFAULTS: ChessMindSettings = { enabled: false, modelId: '', backend: 'auto', arrows: true, aboutPosition: false, sendMoves: true, contextPlies: 'full', think: 'on' };
 /** Earlier chat turns sent with a question. 0: the graph has no KV cache, so every token re-runs the whole
  * sequence and each earlier exchange (~60 tokens) roughly doubles per-token latency. */
 const HISTORY_TURNS = 0;
 export const CHAT_MAX_TOKENS = 60;
+/** Budget of the hidden reasoning (on top of CHAT_MAX_TOKENS). Training thinks are ~180-280 tokens (p90 ~240-330);
+ * the close is forced gracefully at the budget. No KV cache: every token re-runs the whole sequence. */
+export const CHAT_MAX_THINK_TOKENS = 320;
 
 function loadSettings(): ChessMindSettings {
   try {
@@ -72,7 +77,7 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
   const [status, setStatus] = useState<ChessMindStatus>('off');
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ loaded: number; total: number; phase: 'download' | 'compile' } | null>(null);
-  const [info, setInfo] = useState<{ manifest: ModelManifest; backend: string; loadMs: number; cached: boolean; hasText: boolean } | null>(null);
+  const [info, setInfo] = useState<{ manifest: ModelManifest; backend: string; loadMs: number; cached: boolean; hasText: boolean; thinking: boolean } | null>(null);
   const [prediction, setPrediction] = useState<{ key: string; moves: MovePrediction[]; ms: number; tokens: number } | null>(null);
   const [chatBusy, setChatBusy] = useState(false);
   const workerRef = useRef<Worker | null>(null);
@@ -131,7 +136,7 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
           setProgress({ loaded: m.loaded, total: m.total, phase: m.phase });
           break;
         case 'ready':
-          setInfo({ manifest: m.manifest, backend: m.backend, loadMs: m.loadMs, cached: m.cached, hasText: m.hasText });
+          setInfo({ manifest: m.manifest, backend: m.backend, loadMs: m.loadMs, cached: m.cached, hasText: m.hasText, thinking: !!m.thinking });
           setStatus('ready');
           break;
         case 'prediction': {
@@ -233,9 +238,10 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
       if (!worker || status !== 'ready' || chatId.current !== null || !text) return;
       const turns = HISTORY_TURNS > 0 ? chat.filter((m) => m.kind === 'model' && (m.role === 'user' || m.parts.length > 0)).slice(-HISTORY_TURNS) : [];
       if (turns[0]?.role === 'assistant') turns.shift();
+      // Earlier answers without their hidden reasoning, as in training data.
       const history: DialogueTurn[] = turns.map((m) => ({
         role: m.role,
-        parts: m.role === 'user' && m.fen ? [{ kind: 'fen', fen: m.fen }, ...m.parts] : m.parts,
+        parts: m.role === 'user' && m.fen ? [{ kind: 'fen', fen: m.fen }, ...m.parts] : splitThink(m.parts).answer,
       }));
       const id = ++reqId.current;
       const answerId = newId();
@@ -250,9 +256,9 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
           { id: answerId, role: 'assistant', kind: 'model', parts: [], originId: opts.originId, fen: opts.fen },
         ],
       });
-      worker.postMessage({ type: 'chat', id, history, prompt: text, fen: opts.fen, context: opts.context, maxTokens: CHAT_MAX_TOKENS, temperature: 0.8, topK: 50 } satisfies ToWorker);
+      worker.postMessage({ type: 'chat', id, history, prompt: text, fen: opts.fen, context: opts.context, maxTokens: CHAT_MAX_TOKENS, temperature: 0.8, topK: 50, think: settings.think, maxThinkTokens: CHAT_MAX_THINK_TOKENS } satisfies ToWorker);
     },
-    [chat, status, dispatch],
+    [chat, status, dispatch, settings.think],
   );
 
   /** Top moves for the position after `movesUci` plus a short explanation from the model. */

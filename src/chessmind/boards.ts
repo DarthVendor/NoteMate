@@ -47,8 +47,8 @@ export function encodeFen(fen: string): BoardRow {
 export class TrackedBoard {
   readonly chess: Chess;
   ep: number | null = null;
-  constructor(fen?: string) {
-    this.chess = new Chess(fen);
+  constructor(fen?: string, skipValidation = false) {
+    this.chess = new Chess(fen, { skipValidation });
     const ep = fen?.split(' ')[3];
     this.ep = ep && ep !== '-' ? ep.charCodeAt(0) - 97 : null;
   }
@@ -63,11 +63,43 @@ export class TrackedBoard {
   row(): BoardRow {
     return encodeBoardState(this.chess, this.ep);
   }
+  copy(): TrackedBoard {
+    const b = new TrackedBoard(this.chess.fen(), true);
+    b.ep = this.ep;
+    return b;
+  }
 }
 
 /**
- * Port of BoardTracker: <|game|> and <|line|> start a fresh board; <|end_line|>, <|eos|>, <|pad|>, <|bos|>,
- * <|user|>, <|assistant|> end it; legal move tokens are pushed; every other token keeps the current row.
+ * Board of a `<side> + 64 piece tokens (a8..h1)` snapshot, null if malformed (boards._board_from_snapshot): no
+ * en-passant square, castling rights = those consistent with king and rook placement.
+ */
+export function boardFromSnapshot(tok: ChessTokenizer, ids: number[]): TrackedBoard | null {
+  const fen = tok.snapshotFen(ids);
+  if (fen === null) return null;
+  const [placement, side] = fen.split(' ');
+  const grid = placement.split('/').map((r) => r.replace(/\d/g, (d) => '.'.repeat(Number(d))));
+  const at = (sq: string) => grid[8 - Number(sq[1])][sq.charCodeAt(0) - 97];
+  let castling = '';
+  if (at('e1') === 'K' && at('h1') === 'R') castling += 'K';
+  if (at('e1') === 'K' && at('a1') === 'R') castling += 'Q';
+  if (at('e8') === 'k' && at('h8') === 'r') castling += 'k';
+  if (at('e8') === 'k' && at('a8') === 'r') castling += 'q';
+  try {
+    return new TrackedBoard(`${placement} ${side} ${castling || '-'} - 0 1`, true);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Port of BoardTracker (chessmind/data/boards.py): <|game|> and <|line|> start a fresh board; <|end_line|>, <|eos|>,
+ * <|pad|>, <|bos|>, <|user|>, <|assistant|> end it; legal move tokens are pushed; every other token keeps the
+ * current row. `<|fen|> <side> <64 pieces>` snapshots are parsed: the board shows from the snapshot's last token and
+ * later <|line|>s start from it (until the next snapshot or <|bos|> / <|eos|> / <|pad|>). Hidden reasoning
+ * (format 4): a snapshot taken inside `<|think|> ... <|end_think|>` applies until <|end_think|> only, which shows no
+ * board. In-game calculation: a <|line|> while a <|game|> board is active starts from a copy of that board and
+ * <|end_line|> returns to it. `startFen`: the first <|game|> starts there (a cropped game).
  */
 export class BoardTracker {
   private board: TrackedBoard | null = null;
@@ -75,20 +107,80 @@ export class BoardTracker {
   private readonly starts: Set<number>;
   private readonly ends: Set<number>;
   private readonly tok: ChessTokenizer;
-  constructor(tok: ChessTokenizer) {
+  private readonly endThink: number | null;
+  private startFen: string | null;
+  /** Start position for later <|line|>s. */
+  private snapshot: TrackedBoard | null = null;
+  /** Collecting <side> + 64 pieces after <|fen|>. */
+  private fenTokens: number[] | null = null;
+  /** The snapshot before <|think|> (boxed: null = not in a think). */
+  private thinkSaved: { snapshot: TrackedBoard | null } | null = null;
+  /** A <|game|> board is being followed. */
+  private inGame = false;
+  /** The game board while an in-game <|line|> runs. */
+  private gameBoard: TrackedBoard | null = null;
+  constructor(tok: ChessTokenizer, startFen?: string) {
     this.tok = tok;
+    this.startFen = startFen ?? null;
+    this.endThink = tok.endThinkId;
     this.starts = new Set([tok.gameId, tok.lineId]);
-    this.ends = new Set([tok.endLineId, tok.eosId, tok.id('<|pad|>'), tok.id('<|bos|>'), tok.userId, tok.assistantId]);
+    this.ends = new Set([tok.endLineId, tok.eosId, tok.id('<|pad|>'), tok.bosId, tok.userId, tok.assistantId]);
   }
   feed(id: number): BoardRow {
-    if (this.starts.has(id)) {
-      this.board = new TrackedBoard();
+    const tok = this.tok;
+    if (this.fenTokens !== null) {
+      this.fenTokens.push(id);
+      if (this.fenTokens.length === 65) {
+        this.snapshot = boardFromSnapshot(tok, this.fenTokens);
+        this.fenTokens = null;
+        if (this.snapshot) this.current = this.snapshot.row();
+      }
+      return this.current;
+    }
+    if (id === tok.fenId) {
+      this.fenTokens = [];
+      this.board = null;
+      this.current = ABSENT_ROW;
+      return this.current;
+    }
+    if (id === tok.bosId || id === tok.eosId || id === tok.id('<|pad|>')) {
+      this.snapshot = null; // a new sequence / dialogue
+      this.thinkSaved = null;
+    }
+    if (id === tok.thinkId && !this.inGame) {
+      this.thinkSaved = { snapshot: this.snapshot };
+    } else if (this.endThink !== null && id === this.endThink) {
+      if (this.thinkSaved) {
+        this.snapshot = this.thinkSaved.snapshot;
+        this.thinkSaved = null;
+      }
+      this.board = null;
+      this.current = ABSENT_ROW;
+      return this.current;
+    }
+    if (id === tok.lineId && this.inGame && this.board) {
+      this.gameBoard = this.board; // calculation inside a game: the line starts from the game position
+      this.board = this.gameBoard.copy();
+      this.current = this.board.row();
+    } else if (id === tok.endLineId && this.gameBoard) {
+      this.board = this.gameBoard; // back to the game after the calculated line
+      this.gameBoard = null;
+      this.current = this.board.row();
+    } else if (this.starts.has(id)) {
+      if (this.startFen !== null && id === tok.gameId) {
+        this.board = new TrackedBoard(this.startFen);
+        this.startFen = null; // only the first game of the sequence
+      } else if (id === tok.lineId && this.snapshot) this.board = this.snapshot.copy();
+      else this.board = new TrackedBoard();
+      this.inGame = id === tok.gameId;
       this.current = this.board.row();
     } else if (this.ends.has(id)) {
       this.board = null;
+      this.inGame = false;
+      this.gameBoard = null;
       this.current = ABSENT_ROW;
-    } else if (this.board && this.tok.isMoveId(id)) {
-      if (this.board.push(this.tok.idToMove(id))) this.current = this.board.row();
+    } else if (this.board && tok.isMoveId(id)) {
+      if (this.board.push(tok.idToMove(id))) this.current = this.board.row();
     }
     return this.current;
   }

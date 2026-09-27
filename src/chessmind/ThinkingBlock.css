@@ -1,0 +1,135 @@
+/* Hidden-reasoning block of a ChessMind answer (ThinkingBlock.tsx). Colours come from the design tokens. */
+.cm-think {
+  margin: 0 0 6px;
+  font-size: var(--fs-xs, 11.5px);
+  line-height: var(--lh-normal, 1.45);
+}
+.cm-think-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 0 -4px;
+  padding: 2px 6px 2px 4px;
+  font: inherit;
+  color: var(--text-3, #888);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm, 5px);
+  cursor: pointer;
+  transition: color var(--dur-fast, 110ms), background var(--dur-fast, 110ms);
+}
+.cm-think-head:hover:not(:disabled) {
+  color: var(--text-2, #aaa);
+  background: var(--surface-hover, rgba(127, 127, 127, 0.08));
+}
+.cm-think-head:focus-visible {
+  outline: 2px solid var(--focus, currentColor);
+  outline-offset: 1px;
+}
+.cm-think-head:disabled {
+  cursor: default;
+}
+.cm-think-chevron {
+  display: inline-flex;
+  transition: transform var(--dur-med, 180ms) var(--ease-out, ease-out);
+}
+.cm-think-head:disabled .cm-think-chevron {
+  opacity: 0;
+}
+.cm-think.is-expanded .cm-think-chevron {
+  transform: rotate(90deg);
+}
+.cm-think-label {
+  font-weight: var(--fw-medium, 500);
+}
+.cm-think.is-streaming .cm-think-label {
+  background: linear-gradient(90deg, var(--text-3, #888) 0%, var(--text-3, #888) 35%, var(--text-2, #bbb) 50%, var(--text-3, #888) 65%, var(--text-3, #888) 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: cm-think-shimmer 1.8s linear infinite;
+}
+.cm-think-count {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-2xs, 10.5px);
+  color: var(--text-3, #888);
+  opacity: 0.8;
+}
+.cm-think-dots {
+  display: inline-flex;
+  gap: 2px;
+}
+.cm-think-dots i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--cm, currentColor);
+  animation: cm-think-dot 1.2s ease-in-out infinite;
+}
+.cm-think-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.cm-think-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+.cm-think-body {
+  margin: 4px 0 2px 5px;
+  padding: 2px 0 2px 11px;
+  border-left: 1px solid var(--border-strong, var(--border, rgba(127, 127, 127, 0.3)));
+  color: var(--text-3, #888);
+}
+.cm-think-body p {
+  margin: 0 0 3px;
+}
+.cm-think-body p:last-child {
+  margin-bottom: 0;
+}
+.cm-think-line {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--text-2, #aaa);
+}
+.cm-think-fen {
+  font-size: var(--fs-2xs, 10.5px);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps, 0.06em);
+  opacity: 0.85;
+}
+@keyframes cm-think-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -150% 0;
+  }
+}
+@keyframes cm-think-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-1.5px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cm-think.is-streaming .cm-think-label,
+  .cm-think-dots i {
+    animation: none;
+  }
+  .cm-think.is-streaming .cm-think-label {
+    color: var(--text-3, #888);
+    background: none;
+  }
+}
+/* The "Think: on / auto / off" chat option (ChessMindPanel). */
+.cm-think-mode select {
+  width: auto;
+  height: 24px;
+  padding: 0 22px 0 7px;
+  font-size: var(--fs-xs, 11.5px);
+  background-position: right 6px center;
+}

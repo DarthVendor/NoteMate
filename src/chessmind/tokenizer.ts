@@ -9,7 +9,10 @@
  *   2  GPT-2 ByteLevel split, no prefix space (tokenizer v2 models);
  *   3  the chess-notation Split pattern stored in tokenizer.json (CHESS_PRETOKENIZE_PATTERN in Python:
  *      squares, SAN, castling, move numbers stay single pre-tokens) and a space prepended to every
- *      encoded text span (decoding drops it again).
+ *      encoded text span (decoding drops it again);
+ *   4  format 3 text + `extra_special` tokens placed AFTER the text ids (ids extra_offset + i, extra_offset =
+ *      text_offset + text_vocab_size): `<|end_think|>` closes hidden reasoning `<|think|> ... <|end_think|>`.
+ *      Every id below extra_offset is shared with format 3; files without `extra_special` behave as before.
  * Checked against Python by scripts/test-chessmind.mjs (fixtures from ChessMind's scripts/tokenizer_fixture.py).
  */
 
@@ -23,6 +26,10 @@ export interface ChessVocabFile {
   /** 2 (absent) = GPT-2 split, no prefix space; 3 = chess-notation split + prefix space. */
   format?: number;
   text_prefix_space?: boolean;
+  /** Format 4: special tokens after the text ids (`<|end_think|>`, `<|reserved_1|>`, ...). */
+  extra_special?: string[];
+  /** Format 4: first extra id (= text_offset + text_vocab_size). */
+  extra_offset?: number;
 }
 
 interface PreTokenizerJson {
@@ -39,9 +46,9 @@ interface BpeFile {
 
 export type Perspective = 'white' | 'black';
 
-import type { ChatPart } from '../types';
+import type { ChatLeafPart, ChatPart } from '../types';
 
-/** One part of dialogue content: plain text, a line of UCI moves, or a board snapshot (FEN). */
+/** One part of dialogue content: plain text, a line of UCI moves, a board snapshot (FEN) or (format 4) a think. */
 export type DialoguePart = ChatPart;
 export interface DialogueTurn {
   role: 'user' | 'assistant';
@@ -93,6 +100,21 @@ function isolate(text: string, re: RegExp): string[] {
   return out;
 }
 
+/** `{ think, answer }` of decoded content (think parts flattened; `thought`: a think part was present).
+ * ChessTokenizer.split_think in Python. */
+export function splitThink(parts: DialoguePart[]): { think: ChatLeafPart[]; answer: ChatLeafPart[]; thought: boolean } {
+  const think: ChatLeafPart[] = [];
+  const answer: ChatLeafPart[] = [];
+  let thought = false;
+  for (const p of parts) {
+    if (p.kind === 'think') {
+      thought = true;
+      think.push(...p.parts);
+    } else answer.push(p);
+  }
+  return { think, answer, thought };
+}
+
 export class ChessTokenizer {
   readonly special: string[];
   readonly moves: string[];
@@ -105,6 +127,9 @@ export class ChessTokenizer {
   /** Tokenizer format (2 or 3, see the file comment). */
   readonly format: number;
   readonly prefixSpace: boolean;
+  /** Format 4 extra specials (after the text ids), [] for older tokenizers. */
+  readonly extraSpecial: string[];
+  private readonly extraBase: number;
   private readonly split: RegExp;
   private readonly chessToId = new Map<string, number>();
 
@@ -142,10 +167,33 @@ export class ChessTokenizer {
     const pattern = splitPatternOf(bpe?.pre_tokenizer);
     if (this.format >= 3 && bpe && !pattern) throw new Error('format 3 tokenizer.json without a Split pre-tokenizer');
     this.split = pattern ?? SPLIT;
+    this.extraSpecial = chess.extra_special ?? [];
+    // Without the BPE file (no text model) the extras' position comes from chess_vocab.json; older files: as before.
+    this.extraBase =
+      bpe || !this.extraSpecial.length ? this.textOffset + this.textVocabSize : (chess.extra_offset ?? this.textOffset + chess.text_vocab_size);
+    if (bpe && chess.extra_offset !== undefined && chess.extra_offset !== this.extraBase) {
+      throw new Error(`chess_vocab.json extra_offset ${chess.extra_offset} != text_offset + text ids ${this.extraBase}`);
+    }
+    this.extraSpecial.forEach((t, i) => this.chessToId.set(t, this.extraBase + i));
   }
 
+  /** First id after the text ids: format-4 extra specials start here. */
+  get extraOffset(): number {
+    return this.extraBase;
+  }
   get size(): number {
-    return this.textOffset + this.textVocabSize;
+    return this.extraOffset + this.extraSpecial.length;
+  }
+  /** `<|end_think|>` (format 4), else null: the model cannot produce hidden reasoning. */
+  get endThinkId(): number | null {
+    const i = this.extraSpecial.indexOf('<|end_think|>');
+    return i < 0 ? null : this.extraOffset + i;
+  }
+  get supportsThinking(): boolean {
+    return this.endThinkId !== null;
+  }
+  isExtraId(i: number): boolean {
+    return i >= this.extraOffset && i < this.size;
   }
   get hasText(): boolean {
     return this.textVocabSize > 0;
@@ -176,7 +224,7 @@ export class ChessTokenizer {
     return i >= this.moveOffset && i < this.squareOffset;
   }
   isTextId(i: number): boolean {
-    return i >= this.textOffset && i < this.size;
+    return i >= this.textOffset && i < this.extraOffset;
   }
   idToMove(i: number): string {
     if (!this.isMoveId(i)) throw new Error(`id ${i} is not a move token`);
@@ -285,22 +333,38 @@ export class ChessTokenizer {
     return ids;
   }
 
-  /** `<|user|> text <|assistant|> text <|line|> m1 m2 <|end_line|> ...` (lines are assumed legal). */
+  /**
+   * `<|user|> text <|assistant|> text <|line|> m1 m2 <|end_line|> ...` (lines are assumed legal). Format 4: an
+   * assistant turn may start with a think part, `<|think|> parts <|end_think|>`.
+   */
   encodeDialogue(turns: DialogueTurn[]): number[] {
     const ids: number[] = [];
     for (const turn of turns) {
       ids.push(turn.role === 'user' ? this.userId : this.assistantId);
-      for (const part of turn.parts) {
-        if (part.kind === 'text') ids.push(...this.encodeText(part.text));
-        else if (part.kind === 'fen') ids.push(...this.encodeBoard(part.fen));
-        else {
-          ids.push(this.lineId);
-          for (const m of part.moves) ids.push(this.moveToId(m));
-          ids.push(this.endLineId);
+      turn.parts.forEach((part, i) => {
+        if (part.kind !== 'think') return this.encodePart(part, ids);
+        if (turn.role !== 'assistant' || i !== 0) throw new Error('a think part must be the first part of an assistant turn');
+        const endThink = this.endThinkId;
+        if (endThink === null) throw new Error('this tokenizer has no <|end_think|> (format 4 needed for think parts)');
+        ids.push(this.thinkId);
+        for (const sub of part.parts) {
+          if ((sub as DialoguePart).kind === 'think') throw new Error('nested think part');
+          this.encodePart(sub, ids);
         }
-      }
+        ids.push(endThink);
+      });
     }
     return ids;
+  }
+
+  private encodePart(part: ChatLeafPart, ids: number[]): void {
+    if (part.kind === 'text') ids.push(...this.encodeText(part.text));
+    else if (part.kind === 'fen') ids.push(...this.encodeBoard(part.fen));
+    else {
+      ids.push(this.lineId);
+      for (const m of part.moves) ids.push(this.moveToId(m));
+      ids.push(this.endLineId);
+    }
   }
 
   /** Generation prefix for the next assistant turn: `<|eos|> <|user|> ... <|assistant|>` (training packs every
@@ -309,22 +373,43 @@ export class ChessTokenizer {
     return [this.eosId, ...this.encodeDialogue(turns), this.assistantId];
   }
 
-  /** Split assistant output ids into text / line parts (control tokens dropped; an open line is kept). */
+  /**
+   * Split assistant output ids into text / line / fen parts (control tokens dropped; an open line is kept). A
+   * complete `<|fen|> <side> <64 pieces>` snapshot becomes a fen part (placement + side, `- - 0 1`);
+   * `<|think|> ... <|end_think|>` becomes one think part (also while still open, for streaming).
+   * Port of ChessTokenizer.decode_dialogue_content.
+   */
   decodeDialogueContent(ids: number[]): DialoguePart[] {
-    const parts: DialoguePart[] = [];
+    const top: DialoguePart[] = [];
+    let think: ChatLeafPart[] | null = null;
     let textRun: number[] = [];
     let line: string[] | null = null;
+    let fenRun: number[] | null = null;
+    const endThink = this.endThinkId;
+    const out = (): (DialoguePart | ChatLeafPart)[] => think ?? top;
     const flush = () => {
-      if (textRun.length) parts.push({ kind: 'text', text: this.decodeText(textRun).trim() });
+      if (textRun.length) {
+        const text = this.decodeText(textRun).trim();
+        if (text) out().push({ kind: 'text', text });
+      }
       textRun = [];
     };
     for (const t of ids) {
+      if (fenRun !== null) {
+        fenRun.push(t);
+        if (fenRun.length === 65) {
+          const fen = this.snapshotFen(fenRun);
+          if (fen !== null) out().push({ kind: 'fen', fen });
+          fenRun = null;
+        }
+        continue;
+      }
       if (line !== null) {
         if (this.isMoveId(t)) {
           line.push(this.idToMove(t));
           continue;
         }
-        parts.push({ kind: 'line', moves: line });
+        out().push({ kind: 'line', moves: line });
         line = null;
         if (t === this.endLineId) continue;
       }
@@ -334,10 +419,41 @@ export class ChessTokenizer {
       }
       flush();
       if (t === this.lineId) line = [];
+      else if (t === this.fenId) fenRun = [];
+      else if (t === this.thinkId && think === null) think = [];
+      else if (endThink !== null && t === endThink && think !== null) {
+        top.push({ kind: 'think', parts: think });
+        think = null;
+      }
     }
     flush();
-    if (line !== null) parts.push({ kind: 'line', moves: line });
-    return parts;
+    if (line !== null) out().push({ kind: 'line', moves: line });
+    if (think !== null) top.push({ kind: 'think', parts: think });
+    return top;
+  }
+
+  /** FEN (placement + side, `- - 0 1`) of `<side> + 64 piece tokens`; null if malformed. */
+  snapshotFen(ids: number[]): string | null {
+    if (ids.length !== 65 || (ids[0] !== this.whiteId && ids[0] !== this.blackId)) return null;
+    const rows: string[] = [];
+    for (let r = 0; r < 8; r++) {
+      let row = '';
+      let empty = 0;
+      for (let f = 0; f < 8; f++) {
+        const k = ids[1 + 8 * r + f] - this.pieceOffset;
+        if (k < 0 || k >= PIECE_SYMBOLS.length) return null;
+        const sym = PIECE_SYMBOLS[k];
+        if (sym === '.') {
+          empty++;
+          continue;
+        }
+        if (empty) row += String(empty);
+        empty = 0;
+        row += sym;
+      }
+      rows.push(row + (empty ? String(empty) : ''));
+    }
+    return `${rows.join('/')} ${ids[0] === this.whiteId ? 'w' : 'b'} - - 0 1`;
   }
 
   /** Chess tokens verbatim, text spans BPE-decoded, joined by spaces (like the Python decode). */
@@ -351,7 +467,7 @@ export class ChessTokenizer {
       }
       if (run.length) out.push(this.decodeText(run));
       run = [];
-      out.push(this.chessTokens[i] ?? `<${i}>`);
+      out.push(this.isExtraId(i) ? this.extraSpecial[i - this.extraOffset] : (this.chessTokens[i] ?? `<${i}>`));
     }
     if (run.length) out.push(this.decodeText(run));
     return out.join(' ');

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Chess } from 'chess.js';
 import type { useChessMind } from './useChessMind';
-import { CHAT_MAX_TOKENS } from './useChessMind';
+import { CHAT_MAX_THINK_TOKENS, CHAT_MAX_TOKENS } from './useChessMind';
+import { ThinkingBlock } from './ThinkingBlock';
 import { COMMAND_HINT, isAnalysisRequest, parseCommand } from './commands';
 import type { GameAction } from '../state/gameReducer';
-import { resolveLine } from '../state/gameReducer';
+import { positionAt, resolveLine } from '../state/gameReducer';
 import { newId } from '../state/pgn';
 import { ROOT_ID, type Arrow, type ChatLineState, type ChatMessage, type GameState, type Square } from '../types';
 
@@ -98,8 +99,31 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onPl
   } else if (status === 'error') statusText = 'error';
   else if (settings.enabled && models === null && !modelsError) statusText = 'looking for models…';
 
-  /** Node a message's lines start from: the asked-at node for position questions, else the start. */
-  const lineOrigin = (m: ChatMessage): string | null => {
+  /** The answer's board snapshot in force at part `pi` (hidden-reasoning models may show one), if any. */
+  const answerFen = (m: ChatMessage, pi: number): string | undefined => {
+    for (let i = pi - 1; i >= 0; i--) {
+      const p = m.parts[i];
+      if (p.kind === 'fen') return p.fen;
+    }
+    return undefined;
+  };
+  /** The asked-at node or its parent when that is snapshot `snap`'s position (placement + side). */
+  const snapshotNode = (m: ChatMessage, snap: string): string | null => {
+    const key = (f: string) => f.split(' ').slice(0, 2).join(' ');
+    const at = m.originId && state.nodes[m.originId] ? m.originId : null;
+    const cands = at ? [at, state.nodes[at].parent] : [];
+    return cands.find((id) => id && key(positionAt(state, id).fen()) === key(snap)) ?? null;
+  };
+  /** A snapshot's full FEN (move number, castling) when it is the asked-at position or the one before. */
+  const snapshotFen = (m: ChatMessage, snap: string): string => {
+    const id = snapshotNode(m, snap);
+    return id ? positionAt(state, id).fen() : snap;
+  };
+  /** Node a message's lines start from: the asked-at node for position questions, else the start. After a snapshot in
+   * the answer: its snapshotNode, else none. */
+  const lineOrigin = (m: ChatMessage, pi?: number): string | null => {
+    const snap = pi === undefined ? undefined : answerFen(m, pi);
+    if (snap) return snapshotNode(m, snap);
     const origin = m.fen ? (m.originId ?? null) : standardStart ? ROOT_ID : null;
     return origin && state.nodes[origin] ? origin : null;
   };
@@ -114,7 +138,7 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onPl
       dispatch({ type: 'GOTO', id: goto <= 0 ? existing!.fromId : existing!.ids[goto - 1] });
       return existing!;
     }
-    const origin = lineOrigin(m);
+    const origin = lineOrigin(m, pi);
     if (!origin) return null;
     const newIds = part.moves.map(() => newId());
     const r = resolveLine(state, origin, part.moves, newIds);
@@ -203,8 +227,9 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onPl
   };
 
   const renderLine = (m: ChatMessage, pi: number, moves: string[]) => {
-    const origin = lineOrigin(m);
-    const startFen = m.fen ?? undefined;
+    const origin = lineOrigin(m, pi);
+    const snap = answerFen(m, pi);
+    const startFen = snap ? snapshotFen(m, snap) : (m.fen ?? undefined);
     const l = m.lines?.[pi];
     const alive = lineAlive(l);
     const tokens = lineTokens(startFen, moves);
@@ -293,11 +318,25 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onPl
         </>
       );
     }
-    if (m.parts.length === 0) {
-      return m.done ? <span className="hint">(no answer; this model may not have learned dialogue yet)</span> : <span className="hint">…</span>;
+    // Hidden reasoning (first part) renders as a collapsible block; only the answer parts drive the board.
+    const think = m.parts[0]?.kind === 'think' ? m.parts[0] : null;
+    const thinkBlock = think && <ThinkingBlock parts={think.parts} open={think.open} tokens={think.tokens} done={m.done} startFen={m.fen} resolveFen={(f) => snapshotFen(m, f)} />;
+    if (m.parts.length === (think ? 1 : 0)) {
+      if (think?.open && !m.done) return thinkBlock;
+      return (
+        <>
+          {thinkBlock}
+          {m.done ? <span className="hint">(no answer; this model may not have learned dialogue yet)</span> : <span className="hint">…</span>}
+        </>
+      );
     }
-    return m.parts.map((p, i) =>
-      p.kind === 'text' ? <span key={i} className="cm-text">{p.text} </span> : p.kind === 'line' ? renderLine(m, i, p.moves) : null,
+    return (
+      <>
+        {thinkBlock}
+        {m.parts.map((p, i) =>
+          p.kind === 'text' ? <span key={i} className="cm-text">{p.text} </span> : p.kind === 'line' ? renderLine(m, i, p.moves) : null,
+        )}
+      </>
     );
   };
 
@@ -465,10 +504,20 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onPl
             <label className="cm-inline" title="Send a board snapshot; lines in the answer continue from this position">
               <input type="checkbox" checked={settings.aboutPosition} onChange={(e) => update({ aboutPosition: e.target.checked })} /> lines from this position
             </label>
+            {info?.thinking && (
+              <label className="cm-inline cm-think-mode" title={`Hidden reasoning before the answer (up to ${CHAT_MAX_THINK_TOKENS} tokens): always, the model's choice, or never`}>
+                Think
+                <select value={settings.think} onChange={(e) => update({ think: e.target.value as typeof settings.think })} data-testid="chessmind-think-mode">
+                  <option value="on">on</option>
+                  <option value="auto">auto</option>
+                  <option value="off">off</option>
+                </select>
+              </label>
+            )}
           </div>
           {lastAnswer && (
             <p className="hint engine-desc" data-testid="chessmind-latency">
-              {lastAnswer.tokens} tokens (max {CHAT_MAX_TOKENS}) · {lastAnswer.msPerToken!.toFixed(0)} ms/token
+              {lastAnswer.tokens} tokens (max {CHAT_MAX_TOKENS + (info?.thinking && settings.think !== 'off' ? CHAT_MAX_THINK_TOKENS + 2 : 0)}) · {lastAnswer.msPerToken!.toFixed(0)} ms/token
               {lastAnswer.prefillMs !== undefined ? ` · first ${lastAnswer.prefillMs.toFixed(0)} ms` : ''}
             </p>
           )}

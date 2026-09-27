@@ -1,9 +1,10 @@
 // Parity tests of the browser ChessMind port against Python fixtures: board-embedding codes
 // (src/chessmind/fixtures/board-codes.json, from ChessMind's scripts/board_codes_fixture.py) and tokenizer v3
 // (src/chessmind/fixtures/tokenizer-v3.json, from ChessMind's scripts/tokenizer_fixture.py): text ids for
-// notation / unicode / whitespace strings, chat prompts, per-side game prompts and cropped per-side board rows.
+// notation / unicode / whitespace strings, chat prompts, per-side game prompts and cropped per-side board rows; and
+// tokenizer v4 (tokenizer-v4.json, format 4): the same checks plus hidden-reasoning dialogues (encode, board rows, decode).
 // Usage: node scripts/test-chessmind.mjs   (Node >= 23: imports the TypeScript sources directly)
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { ChessTokenizer } from '../src/chessmind/tokenizer.ts';
 import { BoardTracker, encodeFen, encodeGameWithBoards } from '../src/chessmind/boards.ts';
 
@@ -31,29 +32,65 @@ for (const c of fx.cropped) {
 }
 const boardChecks = total;
 
+/** The tokenizer checks shared by every text fixture (v3 and the format-4 v4). */
+function tokenizerChecks(tv, t, label) {
+  for (const c of tv.texts) {
+    const ids = t.encodeText(c.text);
+    check(`${label} text ${JSON.stringify(c.text.slice(0, 40))}`, same(ids, c.ids), `${ids.slice(0, 12)} vs ${c.ids.slice(0, 12)}`);
+    const dec = t.decodeText(c.ids);
+    check(`${label} decode ${JSON.stringify(c.text.slice(0, 40))}`, dec === c.decoded, `${JSON.stringify(dec)} vs ${JSON.stringify(c.decoded)}`);
+  }
+  for (const c of tv.chats) {
+    const ids = t.chatPrompt(c.turns);
+    check(`${label} chat prompt ${JSON.stringify(c.turns[0].parts[0])}`, same(ids, c.ids), `${ids.slice(0, 12)} vs ${c.ids.slice(0, 12)}`);
+  }
+  for (const g of tv.games) {
+    const ids = t.encodeGame(g.moves, g.result ?? undefined, g.perspective);
+    check(`${label} game prompt ${g.name}`, same(ids, g.ids));
+    const rows = new BoardTracker(t).rows(ids);
+    check(`${label} game prompt rows ${g.name}`, same(rows, g.rows));
+    check(`${label} side to move ${g.name}`, ChessTokenizer.sideToMove(g.moves.length) === g.perspective);
+  }
+  for (const c of tv.cropped) {
+    const { ids, rows } = encodeGameWithBoards(t, c.moves, c.k, c.perspective);
+    check(`${label} cropped per-side ${c.name}`, same(ids, c.ids) && same(rows, c.rows), `${ids.slice(0, 6)} vs ${c.ids.slice(0, 6)}`);
+  }
+}
+
 const tv = JSON.parse(readFileSync(new URL('../src/chessmind/fixtures/tokenizer-v3.json', import.meta.url), 'utf8'));
 const t3 = new ChessTokenizer(tv.chess_vocab, tv.bpe);
-check('v3 format / prefix space', t3.format === 3 && t3.prefixSpace);
-for (const c of tv.texts) {
-  const ids = t3.encodeText(c.text);
-  check(`text ${JSON.stringify(c.text.slice(0, 40))}`, same(ids, c.ids), `${ids.slice(0, 12)} vs ${c.ids.slice(0, 12)}`);
-  const dec = t3.decodeText(c.ids);
-  check(`decode ${JSON.stringify(c.text.slice(0, 40))}`, dec === c.decoded, `${JSON.stringify(dec)} vs ${JSON.stringify(c.decoded)}`);
+check('v3 format / prefix space / no thinking', t3.format === 3 && t3.prefixSpace && !t3.supportsThinking && t3.endThinkId === null && t3.size === t3.extraOffset);
+tokenizerChecks(tv, t3, 'v3');
+const v3Checks = total - boardChecks;
+
+// Format 4 (hidden reasoning): tokenizer-v4.json from ChessMind's scripts/tokenizer_fixture.py, when present.
+const v4Url = new URL('../src/chessmind/fixtures/tokenizer-v4.json', import.meta.url);
+let v4Summary = 'no tokenizer-v4 fixture';
+if (existsSync(v4Url)) {
+  const f4 = JSON.parse(readFileSync(v4Url, 'utf8'));
+  const t4 = new ChessTokenizer(f4.chess_vocab, f4.bpe);
+  const extras = f4.chess_vocab.extra_special ?? [];
+  check(
+    'v4 extra specials',
+    t4.supportsThinking && t4.endThinkId === t4.extraOffset && t4.extraOffset === (f4.chess_vocab.extra_offset ?? -1) && t4.size === t4.extraOffset + extras.length,
+    `endThink ${t4.endThinkId} extraOffset ${t4.extraOffset} size ${t4.size}`,
+  );
+  check('v4 extras are not text ids', !t4.isTextId(t4.extraOffset) && t4.isTextId(t4.extraOffset - 1) && t4.decode([t4.endThinkId]) === '<|end_think|>');
+  const before = total;
+  tokenizerChecks(f4, t4, 'v4');
+  for (const c of f4.thinking) {
+    const rows = new BoardTracker(t4).rows(c.ids);
+    const bad = rows.findIndex((r, i) => !same(r, c.rows[i]));
+    check(`v4 think rows ${c.name}`, bad < 0 && rows.length === c.rows.length, bad >= 0 ? `first mismatch at token ${bad} (${t4.decode([c.ids[bad]])}): ${rows[bad]} vs ${c.rows[bad]}` : '');
+    if (!c.turns) continue;
+    const ids = [...t4.encodeDialogue(c.turns), t4.eosId];
+    check(`v4 think encode ${c.name}`, same(ids, c.ids), `${t4.decode(ids)}\n   vs ${t4.decode(c.ids)}`);
+    const a = c.ids.lastIndexOf(t4.assistantId);
+    const content = c.ids.slice(a + 1, c.ids[c.ids.length - 1] === t4.eosId ? -1 : undefined);
+    const dec = t4.decodeDialogueContent(content);
+    check(`v4 think decode ${c.name}`, same(dec, c.decoded), `${JSON.stringify(dec)}\n   vs ${JSON.stringify(c.decoded)}`);
+  }
+  v4Summary = `${total - before} tokenizer-v4 checks (${f4.thinking.length} thinking cases)`;
 }
-for (const c of tv.chats) {
-  const ids = t3.chatPrompt(c.turns);
-  check(`chat prompt ${JSON.stringify(c.turns[0].parts[0])}`, same(ids, c.ids), `${ids.slice(0, 12)} vs ${c.ids.slice(0, 12)}`);
-}
-for (const g of tv.games) {
-  const ids = t3.encodeGame(g.moves, g.result ?? undefined, g.perspective);
-  check(`game prompt ${g.name}`, same(ids, g.ids));
-  const rows = new BoardTracker(t3).rows(ids);
-  check(`game prompt rows ${g.name}`, same(rows, g.rows));
-  check(`side to move ${g.name}`, ChessTokenizer.sideToMove(g.moves.length) === g.perspective);
-}
-for (const c of tv.cropped) {
-  const { ids, rows } = encodeGameWithBoards(t3, c.moves, c.k, c.perspective);
-  check(`cropped per-side ${c.name}`, same(ids, c.ids) && same(rows, c.rows), `${ids.slice(0, 6)} vs ${c.ids.slice(0, 6)}`);
-}
-console.log(`${boardChecks - fail}/${boardChecks} board-code checks, ${total - boardChecks} tokenizer-v3 checks (${tv.texts.length} texts); ${total - fail}/${total} passed`);
+console.log(`${boardChecks} board-code checks, ${v3Checks} tokenizer-v3 checks (${tv.texts.length} texts), ${v4Summary}; ${total - fail}/${total} passed`);
 process.exit(fail ? 1 : 0);

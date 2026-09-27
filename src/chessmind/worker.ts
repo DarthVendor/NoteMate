@@ -6,7 +6,7 @@
  * The graph has no KV cache, so every step re-runs the whole (short) sequence.
  */
 import { Chess } from 'chess.js';
-import { ChessTokenizer, type DialoguePart } from './tokenizer';
+import { ChessTokenizer, type DialoguePart, type DialogueTurn } from './tokenizer';
 import { BoardTracker, encodeGameWithBoards, N_SLOTS, type BoardRow } from './boards';
 import { ORT_DIR, ORT_SCRIPT_FILE, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type ToWorker } from './protocol';
 
@@ -152,7 +152,7 @@ async function load(base: string, backend: Backend) {
   if (!session) throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
   // Warm-up run (first run allocates / compiles kernels).
   await forward([tok.gameId], new BoardTracker(tok).rows([tok.gameId]));
-  post({ type: 'ready', manifest, backend: used, loadMs: performance.now() - t0, cached, hasText: tok.hasText });
+  post({ type: 'ready', manifest, backend: used, loadMs: performance.now() - t0, cached, hasText: tok.hasText, thinking: tok.hasText && tok.supportsThinking });
 }
 
 function legalUci(chess: Chess): string[] {
@@ -262,30 +262,135 @@ function sample(logits: Float32Array, allowed: number[], temperature: number, to
   return cand[cand.length - 1].i;
 }
 
-/** Port of chessmind.model.generate.LineConstraint: text outside <|line|>, legal moves (+ <|end_line|>) inside. */
+/**
+ * Port of chessmind.model.generate.LineConstraint: text outside <|line|>, legal moves (+ <|end_line|>) inside.
+ *
+ * `start`: where lines begin (the user's FEN; undefined = the initial position). `positions`: candidate boards
+ * under discussion (dialoguePosition); when given (and the tokenizer can think), `<|fen|>` may be sampled, the side
+ * token after it picks the candidate (the first one per side) and the 64 piece tokens are FORCED to it, which then
+ * becomes the start of later lines. Hidden reasoning (tokenizers with <|end_think|>): `think` true forces <|think|>
+ * as the first token, false forbids it, null lets the model choose (first token only). Inside the think the turn
+ * cannot end (no <|eos|> / <|user|>), <|end_think|> closes it outside a line, and after `maxThinkTokens` think
+ * tokens the close is forced (<|end_line|> first when a line is open). <|end_think|> restores the line start that
+ * was active before the think. A tokenizer without <|end_think|> gets exactly the old masks.
+ */
 class LineConstraint {
   private board: Chess | null = null;
-  private readonly textIds: number[] = [];
   private readonly t: ChessTokenizer;
-  private readonly startFen?: string;
-  constructor(t: ChessTokenizer, startFen?: string) {
+  private start: string | undefined;
+  /** Side token -> candidate FEN. */
+  private readonly positions = new Map<number, string>();
+  private position: string | null = null;
+  private readonly endThink: number | null;
+  private readonly think: boolean | null;
+  private readonly maxThinkTokens: number | null;
+  private readonly textMask: number[];
+  private readonly thinkTextMask: number[];
+  private inThink = false;
+  private thinkTokens = 0;
+  private outerStart: string | undefined;
+  private forced: number[] = [];
+  /** Right after <|fen|>: the side token chooses the candidate. */
+  private pickSide = false;
+  private seen = 0;
+  constructor(t: ChessTokenizer, start?: string, positions: string[] = [], think: boolean | null = null, maxThinkTokens: number | null = null) {
     this.t = t;
-    this.startFen = startFen;
-    for (let i = t.textOffset; i < t.size; i++) this.textIds.push(i);
-    this.textIds.push(t.lineId, t.eosId, t.userId);
+    this.start = start;
+    this.endThink = t.endThinkId;
+    this.think = this.endThink !== null ? think : false;
+    this.maxThinkTokens = maxThinkTokens;
+    // Board snapshots only for models that can think (format 4 was trained with them; keep older masks unchanged).
+    if (this.endThink !== null) {
+      for (const fen of positions) {
+        const side = fen.split(' ')[1] === 'b' ? t.blackId : t.whiteId;
+        if (!this.positions.has(side)) this.positions.set(side, fen);
+      }
+    }
+    const base: number[] = [];
+    for (let i = t.textOffset; i < t.extraOffset; i++) base.push(i);
+    base.push(t.lineId);
+    if (this.positions.size) base.push(t.fenId);
+    this.textMask = [...base, t.eosId, t.userId];
+    this.thinkTextMask = this.endThink !== null ? [...base, this.endThink] : base;
   }
-  feed(id: number) {
-    if (id === this.t.lineId) this.board = this.startFen ? new Chess(this.startFen) : new Chess();
-    else if (id === this.t.endLineId) this.board = null;
-    else if (this.board && this.t.isMoveId(id)) {
-      const m = this.t.idToMove(id);
+  private feedOne(id: number, index: number) {
+    const t = this.t;
+    if (this.inThink) this.thinkTokens++;
+    if (this.pickSide) {
+      this.pickSide = false;
+      this.position = this.positions.get(id)!;
+      this.forced = t.encodeBoard(this.position).slice(2);
+      return;
+    }
+    if (this.forced.length) {
+      this.forced.shift();
+      if (!this.forced.length && this.position !== null) this.start = this.position;
+      return;
+    }
+    if (index === 0 && id === t.thinkId && this.endThink !== null) {
+      this.inThink = true;
+      this.outerStart = this.start;
+      return;
+    }
+    if (this.inThink && id === this.endThink) {
+      this.inThink = false;
+      this.start = this.outerStart;
+      this.board = null;
+      return;
+    }
+    if (id === t.fenId && this.positions.size) this.pickSide = true;
+    else if (id === t.lineId) this.board = new Chess(this.start);
+    else if (id === t.endLineId) this.board = null;
+    else if (this.board && t.isMoveId(id)) {
+      const m = t.idToMove(id);
       this.board.move({ from: m.slice(0, 2), to: m.slice(2, 4), promotion: m[4] });
     }
   }
-  allowed(): number[] {
-    if (!this.board) return this.textIds;
-    return [...legalUci(this.board).map((m) => this.t.moveToId(m)), this.t.endLineId];
+  allowed(out: number[]): number[] {
+    for (let i = this.seen; i < out.length; i++) this.feedOne(out[i], i);
+    this.seen = out.length;
+    const t = this.t;
+    if (this.pickSide) return [...this.positions.keys()].sort((a, b) => a - b);
+    if (this.forced.length) return [this.forced[0]];
+    if (out.length === 0 && this.endThink !== null && this.think !== false) {
+      if (this.think) return [t.thinkId];
+      return [...this.textMask, t.thinkId];
+    }
+    const over = this.inThink && this.maxThinkTokens !== null && this.thinkTokens >= this.maxThinkTokens;
+    if (this.board) {
+      if (over) return [t.endLineId];
+      return [...legalUci(this.board).map((m) => t.moveToId(m)), t.endLineId];
+    }
+    if (this.inThink) return over ? [this.endThink!] : this.thinkTextMask;
+    return this.textMask;
   }
+}
+
+/**
+ * Port of generate.dialogue_position: `start` = the last snapshot of the dialogue (lines start there) and
+ * `positions` = what the last user turn talks about: the end of its last line and the position before that line's
+ * last move (a question about the move just played), else the snapshot. FENs.
+ */
+function dialoguePosition(turns: DialogueTurn[]): { start?: string; positions: string[] } {
+  let start: string | undefined;
+  let positions: string[] = [];
+  for (const turn of turns) {
+    for (const part of turn.parts) {
+      if (part.kind === 'fen') {
+        start = part.fen;
+        positions = [new Chess(part.fen).fen()];
+      } else if (part.kind === 'line') {
+        const b = new Chess(start);
+        let before: string | null = null;
+        for (const m of part.moves) {
+          before = b.fen();
+          b.move({ from: m.slice(0, 2), to: m.slice(2, 4), promotion: m[4] });
+        }
+        if (turn.role === 'user') positions = [b.fen(), ...(before !== null ? [before] : [])];
+      }
+    }
+  }
+  return { start, positions };
 }
 
 interface GenOptions {
@@ -298,7 +403,6 @@ interface GenOptions {
   temperature: number;
   topK: number;
   allowed: (out: number[]) => number[];
-  feed?: (id: number) => void;
   stops: Set<number>;
   render: (out: number[]) => DialoguePart[];
   extra?: Partial<Extract<FromWorker, { type: 'chat-update' }>>;
@@ -324,7 +428,6 @@ async function generate(o: GenOptions) {
     out.push(next);
     ids = [...ids, next];
     if (rows && o.nextRow) rows = [...rows, o.nextRow(next)];
-    o.feed?.(next);
     const done = o.stops.has(next) || step === o.maxTokens - 1;
     post({ type: 'chat-update', id: o.id, parts: o.render(out), tokens: out.length, msPerToken: genMs / out.length, done, prefillMs, ...o.extra });
     if (done) return;
@@ -340,22 +443,34 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
   if (req.fen) userParts.push({ kind: 'fen', fen: req.fen });
   userParts.push({ kind: 'text', text: req.prompt });
   if (req.context?.length) userParts.push({ kind: 'line', moves: req.context });
+  const turns: DialogueTurn[] = [...req.history, { role: 'user', parts: userParts }];
   // <|eos|> <|user|> ... <|assistant|>: the context every training dialogue has (the packer's separator first)
-  const prefix = t.chatPrompt([...req.history, { role: 'user', parts: userParts }]);
-  const constraint = new LineConstraint(t, req.fen);
+  const prefix = t.chatPrompt(turns);
+  const { start, positions } = dialoguePosition(turns);
+  const mode = req.think ?? 'auto';
+  const thinking = t.supportsThinking && mode !== 'off';
+  const maxThink = req.maxThinkTokens ?? 256;
+  const constraint = new LineConstraint(t, start, positions, mode === 'on' ? true : mode === 'off' ? false : null, maxThink);
   const tracker = manifest!.boards ? new BoardTracker(t) : null;
+  const endThink = t.endThinkId;
   await generate({
     id: req.id,
     prefix,
     prefixRows: tracker?.rows(prefix),
     nextRow: tracker ? (id) => tracker.feed(id) : undefined,
-    maxTokens: req.maxTokens,
+    maxTokens: req.maxTokens + (thinking ? maxThink + 2 : 0),
     temperature: req.temperature,
     topK: req.topK,
-    allowed: () => constraint.allowed(),
-    feed: (id) => constraint.feed(id),
+    allowed: (out) => constraint.allowed(out),
     stops: new Set([t.eosId, t.userId]),
-    render: (out) => t.decodeDialogueContent(out),
+    render: (out) => {
+      const parts = t.decodeDialogueContent(out);
+      if (parts[0]?.kind === 'think' && out[0] === t.thinkId) {
+        const close = endThink === null ? -1 : out.indexOf(endThink);
+        parts[0] = { ...parts[0], open: close < 0, tokens: (close < 0 ? out.length : close) - 1 };
+      }
+      return parts;
+    },
   });
 }
 
@@ -373,7 +488,7 @@ async function explain(req: Extract<ToWorker, { type: 'explain' }>) {
   const last = game.rows?.[game.rows.length - 1];
   const prefixRows = game.rows && last ? [...game.rows, last, last] : undefined;
   const allowed: number[] = [];
-  for (let i = t.textOffset; i < t.size; i++) allowed.push(i);
+  for (let i = t.textOffset; i < t.extraOffset; i++) allowed.push(i);
   allowed.push(t.moveId, t.eosId);
   await generate({
     id: req.id,
