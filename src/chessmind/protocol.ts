@@ -1,5 +1,9 @@
 import type { DialoguePart, DialogueTurn } from './tokenizer';
 
+/** Default think budget: tokens of hidden reasoning before <|end_think|> is forced (as chat() in generate.py).
+ * Training traces fit in it (engine-think max ~410 tokens). */
+export const DEFAULT_MAX_THINK_TOKENS = 640;
+
 /**
  * onnxruntime-web CPU build, served from the app's own origin under ort/ (scripts/copy-ort.mjs). The artifact host
  * blocks fetching .wasm from CDNs and caps files at 15 MB, which rules out the 26.8 MB WebGPU runtime; for these int8
@@ -59,7 +63,7 @@ export type ToWorker =
       /** Hidden reasoning (models whose tokenizer has <|end_think|>): 'on' forces <|think|> first, 'off' forbids it,
        * 'auto' lets the model choose. Ignored by other models. */
       think?: ThinkMode;
-      /** Most tokens inside <|think|> ... <|end_think|> before the close is forced. */
+      /** Most tokens inside <|think|> ... <|end_think|> before the close is forced (default DEFAULT_MAX_THINK_TOKENS). */
       maxThinkTokens?: number;
     }
   | { type: 'explain'; id: number; moves: string[]; maxTokens: number; temperature: number; topK: number; top: number; contextPlies: number | null }

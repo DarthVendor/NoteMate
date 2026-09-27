@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ChessMindWorker from './worker.ts?worker&inline';
-import type { Backend, FromWorker, ModelManifest, MovePrediction, ThinkMode, ToWorker } from './protocol';
+import { DEFAULT_MAX_THINK_TOKENS, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type ThinkMode, type ToWorker } from './protocol';
 import { splitThink, type DialogueTurn } from './tokenizer';
 import type { ChatMessage } from '../types';
 import type { GameAction } from '../state/gameReducer';
@@ -49,9 +49,9 @@ const DEFAULTS: ChessMindSettings = { enabled: false, modelId: '', backend: 'aut
  * sequence and each earlier exchange (~60 tokens) roughly doubles per-token latency. */
 const HISTORY_TURNS = 0;
 export const CHAT_MAX_TOKENS = 60;
-/** Budget of the hidden reasoning (on top of CHAT_MAX_TOKENS). Training thinks are ~180-280 tokens (p90 ~240-330);
+/** Budget of the hidden reasoning (on top of CHAT_MAX_TOKENS). Training thinks are ~220 tokens (p90 ~290, max ~410);
  * the close is forced gracefully at the budget. No KV cache: every token re-runs the whole sequence. */
-export const CHAT_MAX_THINK_TOKENS = 320;
+export const CHAT_MAX_THINK_TOKENS = DEFAULT_MAX_THINK_TOKENS;
 
 function loadSettings(): ChessMindSettings {
   try {

@@ -8,7 +8,7 @@
 import { Chess } from 'chess.js';
 import { ChessTokenizer, type DialoguePart, type DialogueTurn } from './tokenizer';
 import { BoardTracker, encodeGameWithBoards, N_SLOTS, type BoardRow } from './boards';
-import { ORT_DIR, ORT_SCRIPT_FILE, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type ToWorker } from './protocol';
+import { DEFAULT_MAX_THINK_TOKENS, ORT_DIR, ORT_SCRIPT_FILE, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type ToWorker } from './protocol';
 
 // Minimal typing of the onnxruntime-web globals used here.
 interface OrtTensor { data: Float32Array | BigInt64Array; dims: readonly number[]; dispose?: () => void }
@@ -449,7 +449,7 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
   const { start, positions } = dialoguePosition(turns);
   const mode = req.think ?? 'auto';
   const thinking = t.supportsThinking && mode !== 'off';
-  const maxThink = req.maxThinkTokens ?? 256;
+  const maxThink = req.maxThinkTokens ?? DEFAULT_MAX_THINK_TOKENS;
   const constraint = new LineConstraint(t, start, positions, mode === 'on' ? true : mode === 'off' ? false : null, maxThink);
   const tracker = manifest!.boards ? new BoardTracker(t) : null;
   const endThink = t.endThinkId;
