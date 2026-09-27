@@ -7,6 +7,8 @@ import type { useEngine } from '../engine/useEngine';
 import type { useChessMind } from '../chessmind/useChessMind';
 import type { useSimulate } from '../simulate/useSimulate';
 import type { UiSettings } from '../ui/settings';
+import type { useGameReview } from '../review/useGameReview';
+import type { SavedGame } from '../state/history';
 import type { LayoutApi } from '../workspace/useLayout';
 
 export interface ToastAction {
@@ -30,6 +32,12 @@ export interface AppCtx {
   engine: ReturnType<typeof useEngine>;
   chessmind: ReturnType<typeof useChessMind>;
   sim: ReturnType<typeof useSimulate>;
+  /** Engine game review (Review panel). */
+  review: ReturnType<typeof useGameReview>;
+  /** Games put aside by imports, newest first. */
+  savedGames: SavedGame[];
+  /** Put a saved game back on the board (the current one is saved in its place). */
+  restoreGame: (id: string) => void;
   ui: UiSettings;
   updateUi: (patch: Partial<UiSettings>) => void;
   layout: LayoutApi;

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>NoteMate for chess.com: options</title>
+    <link rel="stylesheet" href="../popup/popup.css" />
+    <style>
+      body { width: auto; max-width: 560px; margin: 32px auto; padding: 0 20px; }
+      fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin: 0 0 14px; }
+      legend { padding: 0 6px; color: var(--text-2); font-size: 12px; font-weight: 600; }
+      .field { display: grid; gap: 4px; margin-bottom: 10px; }
+      .field input { width: 100%; }
+      .check { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; }
+      .check input { height: auto; margin-top: 3px; }
+      .actions { display: flex; gap: 10px; align-items: center; }
+      p.note { color: var(--text-2); font-size: 12.5px; line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="5" fill="currentColor" /><rect x="5" y="5" width="7" height="7" class="cut" /><rect x="12" y="12" width="7" height="7" class="cut" /></svg>
+      <h1>NoteMate for chess.com</h1>
+    </header>
+    <form id="form">
+      <fieldset>
+        <legend>chess.com</legend>
+        <label class="field">
+          <span>Username</span>
+          <input id="username" autocomplete="off" spellcheck="false" />
+          <span class="hint" id="detected"></span>
+        </label>
+        <label class="check"><input type="checkbox" id="showButton" /> <span>Show "Analyze in NoteMate" on chess.com after a game has finished</span></label>
+        <label class="check"><input type="checkbox" id="archiveButtons" /> <span>Add a NoteMate button to each game on game-archive pages</span></label>
+      </fieldset>
+      <fieldset>
+        <legend>NoteMate</legend>
+        <label class="field">
+          <span>NoteMate URL</span>
+          <input id="noteMateUrl" spellcheck="false" />
+          <span class="hint">Where NoteMate runs (<code>npm run host</code> serves it at http://localhost:4173/).</span>
+        </label>
+        <label class="check"><input type="checkbox" id="reuseTab" /> <span>Reuse an open NoteMate tab</span></label>
+      </fieldset>
+      <div class="actions">
+        <button class="btn primary" type="submit">Save</button>
+        <span id="status" class="status"></span>
+      </div>
+    </form>
+    <p class="note">
+      <b>Fair play.</b> chess.com does not allow outside help during a game. This extension does nothing while a game is in
+      progress in any chess.com tab: no button, no game lists, no requests. It opens only games that have finished and that
+      chess.com's public API lists in your archive. It never reads positions from the page or touches the board. It stores
+      only your public username, never a password or cookie.
+    </p>
+    <script src="../lib/settings.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

@@ -34,7 +34,7 @@ In the app, set **Engine server** to `http://localhost:4174`. The setting is sav
 - **Variations**: playing a different move from any position creates a branch. The move list shows alternatives indented under the move they replace, with "Make main line" and "Delete from here" above it. ↑/↓ switch between alternatives.
 - **Erase**: the Erase menu above the move list (also the eraser under the board) removes every side line (`Shift+⌫`; chat lines included, the main line and its notes stay), arrows and highlights on all positions, this position's marks (`X`), or everything. It acts at once; the message that follows has **Undo** for a few seconds.
 - **Navigation**: ← → Home End (or `J`/`K`), the buttons under the board, or click a move. `F` flips the board.
-- **Import / export**: Import (`I`) accepts pasted or dropped PGN or a `.pgn` file (chess.com and ChessBase both export PGN). Nested variations are imported and `{comments}` become sticky notes. "Copy PGN" writes the full tree back out with notes as comments.
+- **Import / export**: Import (`I`) accepts pasted or dropped PGN or a `.pgn` file (chess.com and ChessBase both export PGN). Nested variations are imported and `{comments}` become sticky notes (clock and eval commands such as `[%clk 0:02:59]` are dropped). Ratings, time control, termination and the game link are kept. "Copy PGN" writes the full tree back out with notes as comments.
 - **Engine**: the strip at the top of the Analysis panel shows it on/off (or `E`), the evaluation, the best line (click it to play the first move) and the depth; the chevron shows every line (MultiPV), the sliders icon the settings (build, server, threads, lines, depth, hash; also in Settings). The blue arrow on the board is the engine's top move.
 - **Command palette**: `⌘K` / `Ctrl+K` runs any action (navigation, panels, layouts, theme, board colours). `?` lists every shortcut.
 
@@ -54,6 +54,26 @@ Adding a panel: write a component that reads app state with `useApp()` and regis
 The Full builds are ~99 MB and can take a minute to download and compile on first use; the browser caches them afterwards. Multi-threaded builds need the page to be cross-origin isolated. The Vite dev and preview servers already send the required `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` headers; a production host must send the same.
 
 Everything is saved to `localStorage` (game, annotations, engine settings, layout, appearance).
+
+## chess.com games (browser extension)
+
+`extension/` is a Chrome (MV3, Firefox-compatible) extension. It opens your chess.com games in NoteMate once they have finished. See [extension/README.md](extension/README.md).
+
+**Install:** open `chrome://extensions`, switch on **Developer mode**, click **Load unpacked** and pick the `extension/` folder. Then set your chess.com username in the popup.
+
+- After a game, an **Analyze in NoteMate** chip appears on the chess.com page. The popup offers **Analyze my last game** and your recent games, and archive pages get a NoteMate button per game.
+- Games come from chess.com's official public API and reach NoteMate as a compressed PGN in the URL fragment (`#import=chesscom&d=…`).
+- NoteMate then does the following:
+  - keeps the current game in a history (**Undo** in the toast, or "Restore earlier game" in the palette);
+  - loads the players, ratings, time control, result and link (clock comments are dropped);
+  - turns the board to your colour and switches the engine on;
+  - runs the **Review** panel's game review: Stockfish at depth 10, with blunders (≥ 20% win chance lost) and mistakes (≥ 10%) noted on their moves, plus an accuracy per side and a win-chance chart;
+  - asks ChessMind "Review this game" if the model is loaded.
+
+  Both the review and the ChessMind question can be switched off under **Settings → chess.com import**. The review can also be run on any game from the palette ("Review game with the engine").
+- **Fair play:** chess.com forbids outside help during games. The extension does nothing while a game is in progress in any chess.com tab: no button, no lists, no requests. It opens only games that the page shows as finished *and* that chess.com's archive lists, and the archive holds finished games only. It never reads positions from the page or touches the board, and it stores no credentials. Use it for personal analysis only, not to collect training data.
+
+Tests: `npm run test:import` (NoteMate side) and `npm run test:extension` (set `PLAYWRIGHT_DIR` for the DOM fixture tests). `extension/test/e2e.mjs` is an end-to-end run with the unpacked extension.
 
 ## ChessMind (in-browser language model)
 

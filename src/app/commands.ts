@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import {
-  ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronFirst, ChevronLast, ClipboardCopy, Cpu, Eraser, FilePlus2, FlipVertical2,
+  ArrowDown, ArrowLeft, ChartLine, History as HistoryIcon, ArrowRight, ArrowUp, ChevronFirst, ChevronLast, ClipboardCopy, Cpu, Eraser, FilePlus2, FlipVertical2,
   Keyboard, LayoutTemplate, Moon, MessageSquareText, Palette, PanelsTopLeft, RotateCcw, StickyNote, Sun, SunMoon, Swords, Upload, Wrench,
 } from 'lucide-react';
 import type { AppCtx } from './AppContext';
@@ -56,7 +56,19 @@ export function buildCommands(ctx: AppCtx): Command[] {
         setTimeout(() => document.querySelector<HTMLTextAreaElement>('[data-testid=chessmind-prompt]')?.focus(), 60);
       },
     },
+    {
+      id: 'game.review', title: ctx.review.busy ? 'Stop the game review' : 'Review game with the engine', group: 'Game', icon: ChartLine,
+      keywords: 'blunders mistakes accuracy stockfish annotate analyse',
+      run: () => {
+        if (ctx.review.busy) return ctx.review.cancel();
+        ctx.revealPanel('review');
+        void ctx.review.start();
+      },
+    },
   ];
+  for (const g of ctx.savedGames) {
+    cmds.push({ id: `game.restore.${g.id}`, title: `Restore earlier game: ${g.title}`, group: 'Game', icon: HistoryIcon, keywords: 'history previous undo import back', run: () => ctx.restoreGame(g.id) });
+  }
 
   for (const p of allPanels()) {
     const visible = isVisible(layout.layout, p.id);

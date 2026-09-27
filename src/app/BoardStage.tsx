@@ -6,6 +6,7 @@ import { EvalBar } from '../components/EvalBar';
 import type { Arrow, Square } from '../types';
 import { ROOT_ID } from '../types';
 import { nodeLabel } from '../state/gameReducer';
+import { formatTimeControl } from '../state/pgn';
 import { useApp } from './AppContext';
 import { Onboarding } from './Onboarding';
 
@@ -38,10 +39,12 @@ export function BoardStage() {
     ? engine.lines.slice(0, 1).flatMap((l) => (l.pv[0] ? [{ from: l.pv[0].slice(0, 2) as Square, to: l.pv[0].slice(2, 4) as Square, color: 'engine' as const }] : []))
     : [];
 
-  const { white, black, event, result, date } = state.meta;
+  const { white, black, event, result, date, whiteElo, blackElo, timeControl, link } = state.meta;
   const hasPlayers = !!(white || black);
-  const top = orientation === 'white' ? black : white;
-  const bottom = orientation === 'white' ? white : black;
+  const withElo = (name: string | undefined, elo: string | undefined) => `${name ?? '?'}${elo ? ` (${elo})` : ''}`;
+  const top = orientation === 'white' ? withElo(black, blackElo) : withElo(white, whiteElo);
+  const bottom = orientation === 'white' ? withElo(white, whiteElo) : withElo(black, blackElo);
+  const tc = formatTimeControl(timeControl);
   const status = statusLine(chess);
   const atStart = state.currentId === ROOT_ID;
   const atEnd = state.nodes[state.currentId].children.length === 0;
@@ -71,7 +74,19 @@ export function BoardStage() {
               'Analysis board'
             )}
           </h1>
-          {(event || date || (result && result !== '*')) && <p className="game-sub">{[event, date?.replace(/\.\?\?/g, ''), result !== '*' ? result : null].filter(Boolean).join(' · ')}</p>}
+          {(event || date || tc || (result && result !== '*')) && (
+            <p className="game-sub">
+              {[event, tc, date?.replace(/\.\?\?/g, ''), result !== '*' ? result : null].filter(Boolean).join(' · ')}
+              {link && (
+                <>
+                  {' · '}
+                  <a href={link} target="_blank" rel="noreferrer" data-testid="game-link">
+                    {state.meta.source === 'chess.com' ? 'chess.com' : 'source'}
+                  </a>
+                </>
+              )}
+            </p>
+          )}
         </div>
         <div className={`stage-status tone-${status.tone}`} aria-live="polite">
           <span className={`turn-dot ${chess.turn()}`} aria-hidden />
@@ -84,7 +99,7 @@ export function BoardStage() {
 
       <div className={`stage-board ${hasPlayers ? 'has-players' : ''} ${engine.settings.enabled ? 'has-eval' : ''}`}>
         <div className="board-frame">
-          {hasPlayers && <div className="player player-top">{top ?? '?'}</div>}
+          {hasPlayers && <div className="player player-top">{top}</div>}
           <div className="board-with-eval">
             {engine.settings.enabled ? <EvalBar line={engine.lines[0]} sideToMove={chess.turn()} orientation={orientation} /> : <div className="eval-bar placeholder" aria-hidden />}
             <Board
@@ -101,7 +116,7 @@ export function BoardStage() {
               legalMoves={ui.legalMoves}
             />
           </div>
-          {hasPlayers && <div className="player player-bottom">{bottom ?? '?'}</div>}
+          {hasPlayers && <div className="player player-bottom">{bottom}</div>}
         </div>
       </div>
 

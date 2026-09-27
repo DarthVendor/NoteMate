@@ -396,3 +396,5 @@
 @keyframes fade-in { from { opacity: 0; } }
 @keyframes pop-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } }
 @keyframes rise-in { from { opacity: 0; transform: translateY(6px); } }
+.game-sub a { color: inherit; text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 2px; }
+.game-sub a:hover { color: var(--accent); }

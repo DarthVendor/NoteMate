@@ -39,6 +39,16 @@ export interface GameMeta {
   date?: string;
   result?: string;
   source?: 'manual' | 'pgn' | 'chess.com' | 'chessbase';
+  whiteElo?: string;
+  blackElo?: string;
+  /** PGN TimeControl, e.g. "600" or "180+2" (seconds + increment). */
+  timeControl?: string;
+  /** How the game ended, e.g. "Hikaru won by resignation". */
+  termination?: string;
+  /** The game's page (chess.com "Link" header). */
+  link?: string;
+  /** Imported from a site for this player: their colour decides the board orientation. */
+  player?: string;
 }
 
 /** One position in the move tree. The root node has no move and represents startFen. */
@@ -105,6 +115,42 @@ export interface GameState {
   meta: GameMeta;
   /** ChessMind conversation about this game. */
   chat?: ChatMessage[];
+  /** Engine game review (Review panel): per-move losses and a per-side summary. */
+  review?: GameReview;
+}
+
+export type MoveClass = 'best' | 'good' | 'inaccuracy' | 'mistake' | 'blunder';
+
+/** One main-line move judged by the engine (win% from the mover's point of view). */
+export interface ReviewedMove {
+  nodeId: string;
+  ply: number;
+  san: string;
+  /** Win% before the move (best play) and after it. */
+  before: number;
+  after: number;
+  loss: number;
+  cls: MoveClass;
+  /** Engine's best move (SAN) in the position before, when it differs from the move played. */
+  best?: string;
+}
+
+export interface ReviewSide {
+  accuracy: number;
+  inaccuracies: number;
+  mistakes: number;
+  blunders: number;
+}
+
+export interface GameReview {
+  depth: number;
+  engine: string;
+  moves: ReviewedMove[];
+  white: ReviewSide;
+  black: ReviewSide;
+  /** Main-line length when the review ran (a changed main line makes it stale). */
+  plies: number;
+  createdAt: number;
 }
 
 export const emptyAnnotation = (): Annotation => ({ arrows: [], highlights: [], notes: [] });

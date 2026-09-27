@@ -17,6 +17,10 @@ export interface UiSettings {
   boardHints: boolean;
   /** Developer tools (the Simulate panel: ChessMind vs Stockfish with an Elo estimate). */
   devTools: boolean;
+  /** After an import from the browser extension (chess.com): run the engine game review. */
+  importReview: boolean;
+  /** ...and ask ChessMind "Review this game" (only when ChessMind is on). */
+  importChat: boolean;
 }
 
 export const DEFAULT_UI: UiSettings = {
@@ -28,6 +32,8 @@ export const DEFAULT_UI: UiSettings = {
   motion: 'normal',
   boardHints: true,
   devTools: false,
+  importReview: true,
+  importChat: true,
 };
 
 export const BOARD_THEMES: { id: BoardTheme; name: string; light: string; dark: string }[] = [

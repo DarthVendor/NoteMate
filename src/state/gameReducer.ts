@@ -1,5 +1,5 @@
 import { Chess, DEFAULT_POSITION } from 'chess.js';
-import type { Annotation, Arrow, ChatMessage, GameState, Highlight, MoveNode, Note, NoteColor, Square } from '../types';
+import type { Annotation, Arrow, ChatMessage, GameReview, GameState, Highlight, MoveNode, Note, NoteColor, Square } from '../types';
 import { emptyAnnotation, ROOT_ID } from '../types';
 import { gameFromParsed, newId, parsePgn } from './pgn';
 
@@ -43,10 +43,18 @@ export type GameAction =
   /** Put back a move tree and position saved before an erase (the chat and game details stay as they are now). */
   | { type: 'RESTORE_TREE'; nodes: GameState['nodes']; currentId: string }
   | { type: 'LOAD_PGN'; pgn: string }
+  /**
+   * Store a game review and replace the review's notes (ids starting with REVIEW_NOTE_PREFIX) with `notes`.
+   * `review: null` removes the review and its notes.
+   */
+  | { type: 'APPLY_REVIEW'; review: GameReview | null; notes: { nodeId: string; text: string; color: NoteColor }[] }
   | { type: 'NEW_GAME' }
   | { type: 'REPLACE'; state: GameState };
 
 export type EraseScope = 'variations' | 'shapes' | 'all';
+
+/** Notes written by the game review start with this id prefix, so a new review replaces them. */
+export const REVIEW_NOTE_PREFIX = 'review-';
 
 export const initialGameState = (): GameState => ({
   version: 2,
@@ -359,6 +367,26 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       } catch {
         return state;
       }
+    }
+    case 'APPLY_REVIEW': {
+      const nodes = { ...state.nodes };
+      for (const [id, node] of Object.entries(nodes)) {
+        const a = node.annotation;
+        if (!a?.notes.some((n) => n.id.startsWith(REVIEW_NOTE_PREFIX))) continue;
+        const notes = a.notes.filter((n) => !n.id.startsWith(REVIEW_NOTE_PREFIX));
+        const next: MoveNode = { ...node };
+        if (notes.length || a.arrows.length || a.highlights.length) next.annotation = { ...a, notes };
+        else delete next.annotation;
+        nodes[id] = next;
+      }
+      let next: GameState = { ...state, nodes };
+      if (action.review) next.review = action.review;
+      else delete next.review;
+      for (const n of action.notes) {
+        if (!nodes[n.nodeId]) continue;
+        next = gameReducer(next, { type: 'ADD_NOTE', color: n.color, text: n.text, nodeId: n.nodeId, id: `${REVIEW_NOTE_PREFIX}${newId()}` });
+      }
+      return next;
     }
     case 'NEW_GAME':
       return initialGameState();

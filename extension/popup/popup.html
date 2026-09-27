@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>NoteMate</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="5" fill="currentColor" /><rect x="5" y="5" width="7" height="7" class="cut" /><rect x="12" y="12" width="7" height="7" class="cut" /></svg>
+      <h1>NoteMate</h1>
+      <a id="options" href="#" title="Options">Options</a>
+    </header>
+
+    <p id="fairplay" class="banner" hidden>A chess.com game is in progress. NoteMate stays off until it has finished.</p>
+
+    <form id="user-form" class="row">
+      <label for="username">chess.com user</label>
+      <input id="username" autocomplete="off" spellcheck="false" placeholder="username" />
+      <button type="submit" class="btn">Save</button>
+    </form>
+    <p id="user-hint" class="hint"></p>
+
+    <button id="last" class="btn primary wide" type="button">Analyze my last game</button>
+    <p id="status" class="status" role="status"></p>
+
+    <section>
+      <h2>Recent games <button id="refresh" class="link" type="button" title="Reload the list">Refresh</button></h2>
+      <ol id="games" class="games"></ol>
+      <p id="games-empty" class="hint" hidden></p>
+    </section>
+
+    <form id="url-form" class="row small">
+      <label for="notemate-url">NoteMate</label>
+      <input id="notemate-url" spellcheck="false" />
+      <button type="submit" class="btn">Save</button>
+    </form>
+
+    <footer>Only finished games, via chess.com's public API. Never during a game.</footer>
+    <script src="../lib/settings.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

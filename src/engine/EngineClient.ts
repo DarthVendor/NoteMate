@@ -173,11 +173,11 @@ export class EngineClient {
   }
 
   /**
-   * One search with a time or node limit, for playing rather than analysing. Resolves with the best move
+   * One search with a time, node or depth limit, for playing (or reviewing a game) rather than analysing. Resolves with the best move
    * (null when there is none) and the last principal line's score (side to move's point of view).
    * Meant for a dedicated client: a running analysis is stopped first.
    */
-  async bestMove(fen: string, limit: { movetime?: number; nodes?: number }, timeoutMs = 120000): Promise<{ move: string | null; cp?: number; mate?: number; depth?: number }> {
+  async bestMove(fen: string, limit: { movetime?: number; nodes?: number; depth?: number }, timeoutMs = 120000): Promise<{ move: string | null; cp?: number; mate?: number; depth?: number }> {
     if (this.searching) {
       const stopped = this.wait((l) => l.startsWith('bestmove'), 10000).catch(() => '');
       this.stop();
@@ -193,7 +193,13 @@ export class EngineClient {
     this.searching = true;
     this.acceptingInfo = false;
     this.send(`position fen ${fen}`);
-    this.send(limit.nodes ? `go nodes ${Math.max(1, Math.round(limit.nodes))}` : `go movetime ${Math.max(1, Math.round(limit.movetime ?? 100))}`);
+    this.send(
+      limit.depth
+        ? `go depth ${Math.max(1, Math.round(limit.depth))}`
+        : limit.nodes
+          ? `go nodes ${Math.max(1, Math.round(limit.nodes))}`
+          : `go movetime ${Math.max(1, Math.round(limit.movetime ?? 100))}`,
+    );
     try {
       const line = await done;
       const mv = line.split(/\s+/)[1];

@@ -135,6 +135,24 @@ export function SettingsPanel() {
         </label>
       </Section>
 
+      <Section title="chess.com import">
+        <p className="field-hint settings-note">Games sent by the NoteMate browser extension (extension/ in the repo) after they finish.</p>
+        <label className="check-row">
+          <span className="check-text">
+            <span>Run the game review</span>
+            <span className="field-hint">Stockfish marks blunders and mistakes (Review panel)</span>
+          </span>
+          <input type="checkbox" checked={ui.importReview} onChange={(e) => updateUi({ importReview: e.target.checked })} data-testid="import-review" />
+        </label>
+        <label className="check-row">
+          <span className="check-text">
+            <span>Ask ChessMind "Review this game"</span>
+            <span className="field-hint">When the model is loaded</span>
+          </span>
+          <input type="checkbox" checked={ui.importChat} onChange={(e) => updateUi({ importChat: e.target.checked })} data-testid="import-chat" />
+        </label>
+      </Section>
+
       <Section title="Developer">
         <label className="check-row">
           <span className="check-text">

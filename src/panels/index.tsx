@@ -8,12 +8,13 @@
  * ChessMind stay available as separate panels for custom layouts. Simulate is a developer panel (dev: true),
  * listed only while Settings → Developer tools is on.
  */
-import { Bot, Cpu, ListTree, PanelRight, Settings2, StickyNote, Swords } from 'lucide-react';
+import { Bot, ChartLine, Cpu, ListTree, PanelRight, Settings2, StickyNote, Swords } from 'lucide-react';
 import { registerPanel } from '../workspace/registry';
 import { useApp } from '../app/AppContext';
 import { ChessMindHost, EngineHost, MovesPanel, NotesPanel, SimulateHost } from './hosts';
 import { SettingsPanel } from './SettingsPanel';
 import { AnalysisPanel } from '../analysis/AnalysisPanel';
+import { ReviewPanel } from '../review/ReviewPanel';
 
 registerPanel({
   id: 'analysis',
@@ -56,6 +57,19 @@ registerPanel({
   useStatus: () => {
     const { chessmind } = useApp();
     return chessmind.chatBusy ? 'busy' : chessmind.status === 'ready' ? 'on' : chessmind.status === 'loading' ? 'busy' : chessmind.status === 'error' ? 'err' : null;
+  },
+});
+registerPanel({
+  id: 'review',
+  title: 'Review',
+  icon: ChartLine,
+  description: 'Engine game review: accuracy, blunders and mistakes',
+  defaultZone: 'left',
+  minSize: 260,
+  component: ReviewPanel,
+  useStatus: () => {
+    const { review } = useApp();
+    return review.busy ? 'busy' : review.phase === 'error' ? 'err' : null;
   },
 });
 registerPanel({ id: 'settings', title: 'Settings', icon: Settings2, description: 'Theme, board, engine and chat options', defaultZone: 'right', minSize: 280, component: SettingsPanel });

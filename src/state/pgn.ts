@@ -43,8 +43,14 @@ export function parsePgn(pgn: string): ParsedGame {
       if (isSpace(c)) { i++; continue; }
       if (c === '{') {
         const end = text.indexOf('}', i);
-        const body = text.slice(i + 1, end < 0 ? text.length : end).replace(/\s+/g, ' ').trim();
+        // Embedded commands such as chess.com's clock times ([%clk 0:02:59.2]) or [%eval ...] are not notes.
+        const body = text
+          .slice(i + 1, end < 0 ? text.length : end)
+          .replace(/\[%[^\]]*\]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
         i = end < 0 ? text.length : end + 1;
+        if (!body) continue;
         if (moves.length) {
           const last = moves[moves.length - 1];
           last.comment = last.comment ? `${last.comment} ${body}` : body;
@@ -134,8 +140,47 @@ export function gameFromParsed(parsed: ParsedGame): GameState {
     startFen,
     nodes,
     currentId: ROOT_ID,
-    meta: { white: h.White, black: h.Black, event: h.Event, date: h.Date, result: h.Result, source: 'pgn' },
+    meta: metaFromHeaders(h),
   };
+}
+
+const known = (v: string | undefined) => (v && v !== '?' && v !== '-' ? v : undefined);
+
+/** Game details from PGN headers (players, ratings, time control, result, link). */
+export function metaFromHeaders(h: Record<string, string>): GameState['meta'] {
+  const link = known(h.Link) ?? (/^https?:\/\//.test(h.Site ?? '') ? h.Site : undefined);
+  const chessCom = /chess\.com/i.test(`${h.Site ?? ''} ${link ?? ''}`);
+  const meta: GameState['meta'] = {
+    white: h.White,
+    black: h.Black,
+    event: h.Event,
+    date: h.Date,
+    result: h.Result,
+    source: chessCom ? 'chess.com' : 'pgn',
+    whiteElo: known(h.WhiteElo),
+    blackElo: known(h.BlackElo),
+    timeControl: known(h.TimeControl),
+    termination: known(h.Termination),
+    link,
+  };
+  for (const k of Object.keys(meta) as (keyof typeof meta)[]) if (meta[k] === undefined) delete meta[k];
+  return meta;
+}
+
+/** "600" -> "10 min", "180+2" -> "3+2", "1/86400" -> "1 day/move". */
+export function formatTimeControl(tc: string | undefined): string | undefined {
+  if (!tc) return undefined;
+  const daily = /^1\/(\d+)$/.exec(tc);
+  if (daily) {
+    const days = Math.round(Number(daily[1]) / 86400);
+    return `${days} day${days === 1 ? '' : 's'}/move`;
+  }
+  const m = /^(\d+)(?:\+(\d+))?$/.exec(tc);
+  if (!m) return tc;
+  const base = Number(m[1]);
+  const inc = m[2] ? Number(m[2]) : 0;
+  const mins = base % 60 === 0 ? String(base / 60) : (base / 60).toFixed(1).replace(/\.0$/, '');
+  return inc ? `${mins}+${inc}` : `${mins} min`;
 }
 
 /* ---------- Writing ---------- */
@@ -177,14 +222,20 @@ function writeLine(state: GameState, id: string | undefined, ply: number, forceN
 }
 
 export function toPgn(state: GameState): string {
-  const { white, black, event, date, result } = state.meta;
+  const { white, black, event, date, result, whiteElo, blackElo, timeControl, termination, link } = state.meta;
   const headers: string[] = [];
   const add = (k: string, v?: string) => v && headers.push(`[${k} "${v.replace(/"/g, '\\"')}"]`);
   add('Event', event);
+  add('Site', state.meta.source === 'chess.com' ? 'Chess.com' : undefined);
   add('Date', date);
   add('White', white);
   add('Black', black);
   add('Result', result ?? '*');
+  add('WhiteElo', whiteElo);
+  add('BlackElo', blackElo);
+  add('TimeControl', timeControl);
+  add('Termination', termination);
+  add('Link', link);
   if (state.startFen !== DEFAULT_POSITION) {
     add('SetUp', '1');
     add('FEN', state.startFen);

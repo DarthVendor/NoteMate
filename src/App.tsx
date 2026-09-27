@@ -21,6 +21,9 @@ import { hidePanel, isVisible, showPanel } from './workspace/layout';
 import { setDevPanels } from './workspace/registry';
 import { Workspace } from './workspace/Workspace';
 import { MobileWorkspace } from './workspace/MobileWorkspace';
+import { useGameReview } from './review/useGameReview';
+import { useExternalImport } from './import/useExternalImport';
+import { loadHistory, pushHistory, takeHistory, type SavedGame } from './state/history';
 
 export default function App() {
   const { state, dispatch, chess, annotation, lastMove } = useGame();
@@ -45,12 +48,16 @@ export default function App() {
   const fen = chess.fen();
   // Simulate drives its own engine; the analysis engine pauses while a simulation is active (see useEngine).
   const [simActive, setSimActive] = useState(false);
-  const engine = useEngine(fen, simActive);
+  // ...and while a game review walks the game with its own engine.
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const engine = useEngine(fen, simActive || reviewBusy);
   const standardStart = state.startFen.split(' ').slice(0, 4).join(' ') === DEFAULT_POSITION.split(' ').slice(0, 4).join(' ');
   const uciMoves = useMemo(() => (standardStart ? chess.history({ verbose: true }).map((m) => m.lan) : null), [chess, standardStart]);
   const chessmind = useChessMind(uciMoves, state.chat ?? [], dispatch);
   const sim = useSimulate({ state, dispatch, cm: chessmind, engineSettings: engine.settings, engineAvailable: engine.available });
   useEffect(() => setSimActive(sim.phase === 'loading' || sim.phase === 'running' || sim.phase === 'paused'), [sim.phase]);
+  const review = useGameReview({ state, dispatch, engineSettings: engine.settings, engineAvailable: engine.available, onBusy: setReviewBusy });
+  const [savedGames, setSavedGames] = useState<SavedGame[]>(loadHistory);
   // Developer tools off (at start, or switched off) removes the Simulate panel and stops a running simulation.
   const { edit: editLayout } = layout;
   const { stop: stopSim } = sim;
@@ -120,6 +127,20 @@ export default function App() {
     }
   }, [hasMoves, confirmReset, dispatch, toast]);
 
+  /** Swap a game from the history onto the board (the current game goes into the history). */
+  const restoreGame = useCallback(
+    (id: string) => {
+      const { game } = takeHistory(id);
+      if (!game) return;
+      setSavedGames(pushHistory(state));
+      chessmind.detach();
+      review.cancel();
+      dispatch({ type: 'REPLACE', state: game.state });
+      toast(`Restored ${game.title}`);
+    },
+    [state, dispatch, chessmind, review, toast],
+  );
+
   const revealPanel = useCallback(
     (id: string) => {
       layout.edit((l) => showPanel(l, id));
@@ -129,9 +150,24 @@ export default function App() {
     [layout],
   );
 
+  const { update: updateEngine } = engine;
+  const enableEngine = useCallback(() => updateEngine({ enabled: true }), [updateEngine]);
+  useExternalImport({
+    state,
+    dispatch,
+    setOrientation,
+    enableEngine,
+    chessmind,
+    startReview: (game) => void review.start(undefined, game),
+    ui,
+    toast,
+    revealPanel,
+    onHistory: setSavedGames,
+  });
+
   const ctx: AppCtx = {
     state, dispatch, chess, fen, annotation, lastMove, uciMoves, orientation, flip, playUci,
-    engine, chessmind, sim, ui, updateUi, layout, revealPanel, toast, erase, exportPgn, newGame,
+    engine, chessmind, sim, review, savedGames, restoreGame, ui, updateUi, layout, revealPanel, toast, erase, exportPgn, newGame,
     openImport: () => setShowImport(true),
     openPalette: () => setOverlay('palette'),
     openShortcuts: () => setOverlay('shortcuts'),

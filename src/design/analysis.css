@@ -269,3 +269,42 @@
 .sim-games { margin: 0; padding: 0; list-style: none; max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-xs); }
 .sim-games .link-btn { color: var(--text); }
 .sim-end { margin-left: 6px; }
+
+/* ---------- Game review ---------- */
+.rv-panel { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 16px; font-size: var(--fs-sm); }
+.rv-game { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; color: var(--text-2); font-size: var(--fs-xs); }
+.rv-link { display: inline-flex; align-items: center; gap: 3px; text-decoration: none; }
+.rv-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rv-depth { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: var(--fs-xs); }
+.rv-select { width: auto; height: 26px; padding: 0 6px; font-size: var(--fs-xs); }
+.rv-progress { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.rv-bar { height: 4px; border-radius: var(--r-full); background: var(--bg-sunken); overflow: hidden; }
+.rv-bar > span { display: block; height: 100%; background: var(--accent); transition: width var(--dur-med) var(--ease-out); }
+.rv-empty, .rv-foot { margin: 0; color: var(--text-2); font-size: var(--fs-xs); line-height: var(--lh-normal); }
+.rv-stale { margin: 0; padding: 6px 8px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--warning) 12%, transparent); color: var(--text); font-size: var(--fs-xs); }
+.rv-table { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.rv-table th, .rv-table td { padding: 5px 6px; border-bottom: 1px solid var(--divider); text-align: right; white-space: nowrap; }
+.rv-table th:first-child, .rv-table td:first-child { text-align: left; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+.rv-table th { color: var(--text-3); font: var(--fw-semibold) var(--fs-2xs) var(--font-mono); }
+.rv-acc { font-family: var(--font-mono); font-weight: var(--fw-semibold); color: var(--text); }
+.rv-side { display: inline-block; width: 9px; height: 9px; margin-right: 6px; border-radius: 2px; border: 1px solid var(--border-strong); vertical-align: -1px; }
+.rv-side.is-white { background: #f4f1ea; }
+.rv-side.is-black { background: #23211e; }
+.rv-table .is-blunder, .rv-tag.is-blunder { color: var(--danger); }
+.rv-table .is-mistake, .rv-tag.is-mistake { color: var(--warning); }
+.rv-table .is-inaccuracy, .rv-tag.is-inaccuracy { color: var(--info); }
+.rv-chart { width: 100%; height: 64px; border-radius: var(--r-sm); background: #23211e; cursor: pointer; display: block; }
+.rv-chart-area { fill: #f1ede4; }
+.rv-chart-mid { stroke: var(--text-3); stroke-width: 0.5; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.rv-chart-cur { stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.rv-dot { stroke: #fff; stroke-width: 0.8; vector-effect: non-scaling-stroke; }
+.rv-dot.is-blunder { fill: var(--danger); }
+.rv-dot.is-mistake { fill: var(--warning); }
+.rv-moves { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 1px; max-height: 280px; overflow-y: auto; }
+.rv-move { width: 100%; display: grid; grid-template-columns: 76px 1fr auto; column-gap: 8px; align-items: baseline; padding: 4px 6px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text); font-size: var(--fs-xs); text-align: left; cursor: pointer; }
+.rv-move:hover:not(:disabled) { background: var(--surface-2); }
+.rv-moves li.is-current .rv-move { background: var(--accent-soft); }
+.rv-tag { font-weight: var(--fw-semibold); }
+.rv-san { font-family: var(--font-mono); }
+.rv-loss { font-family: var(--font-mono); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.rv-best { grid-column: 2 / -1; }

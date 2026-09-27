@@ -14,7 +14,9 @@
     "serve": "vite preview --port 4173 --strictPort",
     "serve:engines": "node scripts/engine-server.mjs 4174",
     "host": "node scripts/copy-engines.mjs && node scripts/copy-chessmind.mjs && node scripts/copy-ort.mjs && vite build && node scripts/host.mjs",
-    "chessmind": "node scripts/copy-chessmind.mjs"
+    "chessmind": "node scripts/copy-chessmind.mjs",
+    "test:import": "node scripts/test-import.mjs",
+    "test:extension": "node --test \"extension/test/*.test.mjs\""
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

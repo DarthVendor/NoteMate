@@ -217,3 +217,4 @@
 .preset-card:hover { border-color: var(--border-strong); }
 .preset-card.active { border-color: var(--accent); background: var(--accent-soft); }
 .settings-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.settings-note { margin: 0 0 6px; }

@@ -1,0 +1,35 @@
+{
+  "games": [
+    {
+      "url": "https://www.chess.com/game/live/111111111",
+      "pgn": "[Event \"Live Chess\"]\n[Site \"Chess.com\"]\n[Date \"2026.09.27\"]\n[Round \"-\"]\n[White \"NoteMateTester\"]\n[Black \"OpponentGuy\"]\n[Result \"1-0\"]\n[WhiteElo \"1500\"]\n[BlackElo \"1480\"]\n[TimeControl \"180+2\"]\n[Termination \"NoteMateTester won by checkmate\"]\n[Link \"https://www.chess.com/game/live/111111111\"]\n\n1. e4 {[%clk 0:03:00]} 1... e5 {[%clk 0:03:00]} 2. Bc4 {[%clk 0:02:59]} 2... Nc6 {[%clk 0:02:58]} 3. Qh5 {[%clk 0:02:57]} 3... Nf6 {[%clk 0:02:50]} 4. Qxf7# {[%clk 0:02:55]} 1-0\n",
+      "time_control": "180+2",
+      "end_time": 1790500000,
+      "rated": true,
+      "time_class": "blitz",
+      "rules": "chess",
+      "white": { "rating": 1500, "result": "win", "username": "NoteMateTester" },
+      "black": { "rating": 1480, "result": "checkmated", "username": "OpponentGuy" }
+    },
+    {
+      "url": "https://www.chess.com/game/daily/222222222",
+      "pgn": "[Event \"Let's Play\"]\n[White \"OtherGuy\"]\n[Black \"NoteMateTester\"]\n[Result \"1/2-1/2\"]\n[TimeControl \"1/86400\"]\n\n1. d4 d5 2. c4 e6 1/2-1/2\n",
+      "time_control": "1/86400",
+      "end_time": 1790400000,
+      "rated": false,
+      "time_class": "daily",
+      "rules": "chess",
+      "white": { "rating": 1210, "result": "agreed", "username": "OtherGuy" },
+      "black": { "rating": 1300, "result": "agreed", "username": "NoteMateTester" }
+    },
+    {
+      "url": "https://www.chess.com/game/live/333333333",
+      "pgn": "[Event \"Live Chess - Chess960\"]\n[White \"NoteMateTester\"]\n[Black \"X\"]\n[Result \"0-1\"]\n\n1. e4 0-1\n",
+      "end_time": 1790300000,
+      "time_class": "rapid",
+      "rules": "chess960",
+      "white": { "rating": 1500, "result": "resigned", "username": "NoteMateTester" },
+      "black": { "rating": 1500, "result": "win", "username": "X" }
+    }
+  ]
+}
