@@ -1,13 +1,22 @@
+/*
+ * ChessMind chat: message bubbles, answer lines as clickable move chips (play through / keep / discard), the hidden
+ * reasoning as a collapsed ThinkingBlock, suggestions for an empty chat, and a composer with a "/" command menu.
+ * Model settings live in a popover (ChessMindSettings); move predictions are PredictionChips (shown by the host).
+ */
 import { useEffect, useRef, useState } from 'react';
 import { Chess } from 'chess.js';
+import { ArrowUp, ArrowUpToLine, Bot, Eraser, Pause, Play, Square as StopIcon, X } from 'lucide-react';
 import type { useChessMind } from './useChessMind';
 import { CHAT_MAX_THINK_TOKENS, CHAT_MAX_TOKENS } from './useChessMind';
 import { ThinkingBlock } from './ThinkingBlock';
-import { COMMAND_HINT, isAnalysisRequest, parseCommand } from './commands';
+import { isAnalysisRequest, parseCommand } from './commands';
+import { ChessMindSettings } from './ChessMindSettings';
+import { uciToSan } from './san';
 import type { GameAction } from '../state/gameReducer';
 import { positionAt, resolveLine } from '../state/gameReducer';
 import { newId } from '../state/pgn';
-import { ROOT_ID, type Arrow, type ChatLineState, type ChatMessage, type GameState, type Square } from '../types';
+import { ROOT_ID, type ChatLineState, type ChatMessage, type GameState } from '../types';
+import { ProgressBar } from '../ui/primitives';
 
 type ChessMindState = ReturnType<typeof useChessMind>;
 
@@ -19,19 +28,12 @@ interface Props {
   fen: string;
   /** Moves (UCI) from the standard start to the current node; null for games with a custom start. */
   uciMoves: string[] | null;
-  onPlayUci: (uci: string) => void;
   onFlip: () => void;
+  /** Rendered between the header and the transcript (the standalone panel puts the move predictions there). */
+  above?: React.ReactNode;
 }
 
-const mb = (bytes: number) => (bytes / 1e6).toFixed(1);
-
-function uciToSan(fen: string | undefined, uci: string): string {
-  try {
-    return new Chess(fen).move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] }).san;
-  } catch {
-    return uci;
-  }
-}
+const mb = (bytes: number) => (bytes / 1e6).toFixed(0);
 
 /** Each move of a UCI line as { label (with move number when due), san }, starting from `fen`. */
 function lineTokens(fen: string | undefined, moves: string[]): { num: string; san: string }[] {
@@ -46,24 +48,48 @@ function lineTokens(fen: string | undefined, moves: string[]): { num: string; sa
     } catch {
       /* keep uci */
     }
-    out.push({ num: white ? `${no}.` : out.length === 0 ? `${no}...` : '', san });
+    out.push({ num: white ? `${no}.` : out.length === 0 ? `${no}…` : '', san });
   }
   return out;
 }
 
 const PLAY_STEP_MS = 800;
 
-export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onPlayUci, onFlip }: Props) {
-  const { settings, update, models, modelsError, modelId, status, error, progress, info, prediction, chatBusy } = cm;
+/** Starters shown in an empty chat. */
+const SUGGESTIONS = ["What's the plan here?", 'What should I play?', 'Show me the Najdorf', 'Review this game'];
+
+/** The "/" menu: board commands handled locally (see commands.ts). `run`: complete as typed; else fill in and edit. */
+const SLASH: { insert: string; desc: string; run?: boolean }[] = [
+  { insert: 'back 2', desc: 'Step back N moves' },
+  { insert: 'forward', desc: 'Step forward', run: true },
+  { insert: 'go to move 12', desc: 'Jump to a move on this line' },
+  { insert: 'start', desc: 'Go to the start position', run: true },
+  { insert: 'end', desc: 'Go to the end of the line', run: true },
+  { insert: 'flip', desc: 'Flip the board', run: true },
+  { insert: 'next variation', desc: 'Switch to the next alternative', run: true },
+  { insert: 'previous variation', desc: 'Switch to the previous alternative', run: true },
+  { insert: 'make this the main line', desc: 'Promote the current line', run: true },
+  { insert: 'delete this line', desc: 'Delete this move and what follows', run: true },
+  { insert: 'note: ', desc: 'Add a note to this position' },
+  { insert: 'arrow e2 e4 red', desc: 'Draw an arrow (green, red, blue, yellow)' },
+  { insert: 'highlight e4', desc: 'Circle a square' },
+  { insert: 'clear arrows', desc: 'Clear arrows and highlights', run: true },
+  { insert: 'play Nf3', desc: 'Play a move (SAN or UCI)' },
+  { insert: 'analyse', desc: 'Top model moves with a short explanation', run: true },
+  { insert: 'new game', desc: 'Start over (clears the chat)', run: true },
+];
+
+export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFlip, above }: Props) {
+  const { settings, update, models, modelsError, modelId, status, error, progress, info, chatBusy } = cm;
   const chat = state.chat ?? [];
   const standardStart = uciMoves !== null;
   const [prompt, setPrompt] = useState('');
+  const [slashSel, setSlashSel] = useState(0);
   const [playing, setPlaying] = useState<{ ids: string[]; step: number } | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
-  const model = models?.find((m) => m.id === modelId);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const model = models?.find((m) => m.id === modelId) ?? models?.[0];
   const lastAnswer = [...chat].reverse().find((m) => m.role === 'assistant' && m.msPerToken);
-  const current = state.nodes[state.currentId];
-  const pinned = (current.annotation?.arrows ?? []).filter((a) => a.color === 'chessmind');
 
   // Keep the newest message in view.
   const lastParts = chat.length ? JSON.stringify(chat[chat.length - 1].parts).length : 0;
@@ -71,6 +97,14 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onPl
     const el = transcriptRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [chat.length, lastParts]);
+
+  // Grow the composer with its text (up to the CSS max-height).
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [prompt]);
 
   // "Play through": step the board along a line.
   useEffect(() => {
@@ -91,13 +125,14 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onPl
 
   let statusText = '';
   if (status === 'loading') {
-    if (!progress) statusText = model ? `loading ${model.sizeMb} MB…` : 'loading…';
-    else if (progress.phase === 'download') statusText = `downloading ${mb(progress.loaded)} / ${mb(progress.total)} MB`;
-    else statusText = 'compiling…';
+    if (!progress) statusText = model ? `Loading ${model.sizeMb} MB…` : 'Loading…';
+    else if (progress.phase === 'download') statusText = `Downloading ${mb(progress.loaded)} / ${mb(progress.total)} MB`;
+    else statusText = 'Compiling…';
   } else if (status === 'ready' && info) {
-    statusText = `${info.backend} · loaded in ${(info.loadMs / 1000).toFixed(1)} s${info.cached ? ' (cached)' : ''}`;
-  } else if (status === 'error') statusText = 'error';
-  else if (settings.enabled && models === null && !modelsError) statusText = 'looking for models…';
+    statusText = `${model ? `${(model.params / 1e6).toFixed(0)}M` : info.manifest.name} · ${info.backend}`;
+  } else if (status === 'error') statusText = 'Error';
+  else if (settings.enabled && models === null && !modelsError) statusText = 'Looking for models…';
+  const loadedTitle = status === 'ready' && info ? `${model?.name ?? info.manifest.name}: loaded in ${(info.loadMs / 1000).toFixed(1)} s${info.cached ? ' (cached)' : ''}` : undefined;
 
   /** The answer's board snapshot in force at part `pi` (hidden-reasoning models may show one), if any. */
   const answerFen = (m: ChatMessage, pi: number): string | undefined => {
@@ -180,10 +215,14 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onPl
       ],
     });
 
-  const submit = () => {
-    const text = prompt.trim();
-    if (!text || chatBusy) return;
+  const send = (raw: string) => {
+    const typed = raw.trim();
+    if (!typed || chatBusy) return;
+    const slashed = typed.startsWith('/');
+    const text = slashed ? typed.slice(1).trim() : typed;
+    if (!text) return;
     setPrompt('');
+    setSlashSel(0);
     const cmd = parseCommand(text, state, chess);
     if (cmd) {
       setPlaying(null);
@@ -204,6 +243,7 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onPl
       cm.analyse(text, uciMoves, state.currentId);
       return;
     }
+    if (slashed) return echo(text, 'Not a board command. Type / to see the commands.');
     if (status !== 'ready') return echo(text, 'That is not a board command, and the model is not loaded yet.');
     if (!info?.hasText) return echo(text, 'This model has no text vocabulary.');
     const fenOpt = settings.aboutPosition ? fen : undefined;
@@ -211,19 +251,16 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onPl
     cm.ask(text, { originId: state.currentId, fen: fenOpt, context });
   };
 
-  const pinArrows = () => {
-    if (!prediction?.moves.length) return;
-    const top = prediction.moves[0].p || 1;
-    const arrows: Arrow[] = prediction.moves.map((m) => ({
-      from: m.uci.slice(0, 2) as Square,
-      to: m.uci.slice(2, 4) as Square,
-      color: 'chessmind',
-      opacity: Math.round((0.25 + 0.6 * (m.p / top)) * 100) / 100,
-    }));
-    dispatch({ type: 'ADD_ARROWS', arrows });
-  };
-  const unpinArrows = () => {
-    for (const a of pinned) dispatch({ type: 'TOGGLE_ARROW', arrow: a });
+  // "/" menu entries matching what follows the slash.
+  const slashQuery = prompt.startsWith('/') && !prompt.includes('\n') ? prompt.slice(1).toLowerCase() : null;
+  const slashItems = slashQuery === null ? [] : SLASH.filter((c) => c.insert.startsWith(slashQuery) || c.desc.toLowerCase().includes(slashQuery)).slice(0, 8);
+  const slashOpen = slashItems.length > 0 && !slashItems.some((c) => c.insert.trim() === slashQuery?.trim() && slashQuery !== '');
+  const sel = Math.min(slashSel, Math.max(0, slashItems.length - 1));
+  const pickSlash = (c: (typeof SLASH)[number]) => {
+    if (c.run) return send(`/${c.insert}`);
+    setPrompt(`/${c.insert}`);
+    setSlashSel(0);
+    requestAnimationFrame(() => inputRef.current?.focus());
   };
 
   const renderLine = (m: ChatMessage, pi: number, moves: string[]) => {
@@ -233,88 +270,102 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onPl
     const l = m.lines?.[pi];
     const alive = lineAlive(l);
     const tokens = lineTokens(startFen, moves);
+    const usable = !!origin || alive;
+    const isPlaying = !!playing && alive && playing.ids === l!.ids;
     return (
-      <span key={pi} className="cm-line-block">
-        <span className="cm-line" data-testid="chessmind-line">
+      <div key={pi} className={`chat-line ${alive ? 'is-in-tree' : ''}`} data-testid="chessmind-line">
+        <div className="chat-line-moves">
           {tokens.map((t, k) => {
             const active = alive && l!.ids[k] === state.currentId;
             return (
-              <span key={k}>
-                {t.num && <span className="cm-num">{t.num}</span>}
-                <button
-                  className={`cm-san ${active ? 'active' : ''}`}
-                  disabled={!origin && !alive}
-                  title={origin || alive ? 'Show this position on the board (adds the line as a variation)' : 'This game does not start from the initial position'}
-                  onClick={() => {
-                    setPlaying(null);
-                    applyLine(m, pi, k + 1);
-                  }}
-                >
-                  {t.san}
-                </button>{' '}
-              </span>
+              <button
+                key={k}
+                className={`chat-san ${active ? 'active' : ''}`}
+                disabled={!usable}
+                title={usable ? 'Show this position (adds the line to the move tree)' : 'This game does not start from the initial position'}
+                onClick={() => {
+                  setPlaying(null);
+                  applyLine(m, pi, k + 1);
+                }}
+              >
+                {t.num && <span className="chat-num">{t.num}</span>}
+                {t.san}
+              </button>
             );
           })}
-          {moves.length === 0 && <span className="hint">(empty line)</span>}
-        </span>
-        {m.done && moves.length > 0 && (origin || alive) && (
-          <span className="cm-line-tools">
-            {playing && alive && playing.ids === l!.ids ? (
-              <button className="cm-link" onClick={() => setPlaying(null)}>■ stop</button>
+          {moves.length === 0 && <span className="faint">(empty line)</span>}
+        </div>
+        {m.done && moves.length > 0 && usable && (
+          <div className="chat-line-actions">
+            {isPlaying ? (
+              <button className="chat-act" onClick={() => setPlaying(null)} data-testid="line-stop">
+                <Pause size={12} /> Stop
+              </button>
             ) : (
               <button
-                className="cm-link"
+                className="chat-act"
                 onClick={() => {
                   const ls = applyLine(m, pi, 0);
                   if (ls) setPlaying({ ids: ls.ids, step: 0 });
                 }}
+                title="Add the line to the move tree and step through it"
+                data-testid="line-play"
               >
-                ▶ play through
+                <Play size={12} /> Play through
               </button>
             )}
             {alive && (
               <>
-                <button className="cm-link" onClick={() => dispatch({ type: 'PROMOTE', id: l!.ids[l!.ids.length - 1] })}>keep as main line</button>
-                {l!.created.some(Boolean) || l!.notes.length ? (
-                  <button className="cm-link" onClick={() => discardLine(m, pi)}>discard</button>
-                ) : null}
+                <button className="chat-act" onClick={() => dispatch({ type: 'PROMOTE', id: l!.ids[l!.ids.length - 1] })} title="Make this line the main line" data-testid="line-keep">
+                  <ArrowUpToLine size={12} /> Keep as main line
+                </button>
+                {(l!.created.some(Boolean) || l!.notes.length > 0) && (
+                  <button className="chat-act danger" onClick={() => discardLine(m, pi)} title="Remove the moves and notes this line added" data-testid="line-discard">
+                    <X size={12} /> Discard
+                  </button>
+                )}
               </>
             )}
-          </span>
+          </div>
         )}
-      </span>
+      </div>
     );
   };
 
   const renderAnswer = (m: ChatMessage) => {
     if (m.kind === 'analysis') {
-      const originFen = m.context ? (() => {
-        const c = new Chess();
-        for (const u of m.context) c.move({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u[4] });
-        return c.fen();
-      })() : undefined;
+      const originFen = m.context
+        ? (() => {
+            const c = new Chess();
+            for (const u of m.context) c.move({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u[4] });
+            return c.fen();
+          })()
+        : undefined;
       return (
         <>
           {m.predictions && (
-            <span className="cm-analysis">
-              {m.predictions.length === 0 ? 'No legal moves.' : 'Top moves: '}
+            <div className="chat-preds">
+              {m.predictions.length === 0 && <span className="faint">No legal moves.</span>}
               {m.predictions.map((p) => (
-                <span key={p.uci}>
-                  <button
-                    className="cm-san"
-                    onClick={() => {
-                      if (m.originId && state.nodes[m.originId]) dispatch({ type: 'ADD_LINE', fromId: m.originId, moves: [p.uci], newIds: [newId()], gotoIndex: 1 });
-                    }}
-                  >
-                    {uciToSan(originFen, p.uci)}
-                  </button>
-                  <span className="cm-fen"> {(p.p * 100).toFixed(0)}%</span>{' '}
-                </span>
+                <button
+                  key={p.uci}
+                  className="pred-chip"
+                  style={{ '--p': `${Math.round(p.p * 100)}%` } as React.CSSProperties}
+                  title="Add this move to the move tree"
+                  onClick={() => {
+                    if (m.originId && state.nodes[m.originId]) dispatch({ type: 'ADD_LINE', fromId: m.originId, moves: [p.uci], newIds: [newId()], gotoIndex: 1 });
+                  }}
+                >
+                  <b>{uciToSan(originFen, p.uci)}</b>
+                  <span>{(p.p * 100).toFixed(0)}%</span>
+                </button>
               ))}
-            </span>
+            </div>
           )}
-          {m.parts.map((p, i) => (p.kind === 'text' ? <span key={i} className="cm-text"> {p.text}</span> : null))}
-          {!m.predictions && !m.done && <span className="hint">…</span>}
+          {m.parts.some((p) => p.kind === 'text') && (
+            <p className="chat-text">{m.parts.map((p, i) => (p.kind === 'text' ? <span key={i}>{p.text} </span> : null))}</p>
+          )}
+          {!m.predictions && !m.done && <Typing />}
         </>
       );
     }
@@ -326,203 +377,234 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onPl
       return (
         <>
           {thinkBlock}
-          {m.done ? <span className="hint">(no answer; this model may not have learned dialogue yet)</span> : <span className="hint">…</span>}
+          {m.done ? <p className="chat-text faint">No answer; this model may not have learned dialogue yet.</p> : <Typing />}
         </>
       );
     }
+    // Consecutive text parts flow as one paragraph; each line is its own block.
+    const blocks: React.ReactNode[] = [];
+    let run: React.ReactNode[] = [];
+    const flush = (key: string) => {
+      if (run.length) blocks.push(<p key={key} className="chat-text">{run}</p>);
+      run = [];
+    };
+    m.parts.forEach((p, i) => {
+      if (p.kind === 'text') run.push(<span key={i}>{p.text} </span>);
+      else if (p.kind === 'line') {
+        flush(`t${i}`);
+        blocks.push(renderLine(m, i, p.moves));
+      }
+    });
+    flush('end');
     return (
       <>
         {thinkBlock}
-        {m.parts.map((p, i) =>
-          p.kind === 'text' ? <span key={i} className="cm-text">{p.text} </span> : p.kind === 'line' ? renderLine(m, i, p.moves) : null,
-        )}
+        {blocks}
       </>
     );
   };
 
-  return (
-    <div className="engine-panel chessmind-panel" data-testid="chessmind-panel">
-      <header className="engine-header">
-        <label className="switch">
-          <input type="checkbox" checked={settings.enabled} onChange={(e) => update({ enabled: e.target.checked })} />
-          <span>ChessMind</span>
-        </label>
-        <span className={`engine-status status-${status}`} data-testid="chessmind-status">{statusText}</span>
-      </header>
-
-      {settings.enabled && (
-        <div className="engine-controls">
-          {models && models.length > 0 && (
-            <div className="cm-row">
-              <label>
-                Model
-                <select value={modelId} onChange={(e) => update({ modelId: e.target.value })} data-testid="chessmind-model">
-                  {models.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name} · {(m.params / 1e6).toFixed(0)}M{m.boards ? ' · board' : ''} · {m.sizeMb} MB
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="cm-backend">
-                Backend
-                <select value={settings.backend} onChange={(e) => update({ backend: e.target.value as typeof settings.backend })}>
-                  <option value="auto">auto</option>
-                  <option value="wasm">wasm (CPU)</option>
-                  <option value="webgpu">WebGPU</option>
-                </select>
-              </label>
+  // Board commands pair up (the command, then what was done) and render as one quiet row.
+  const rows: React.ReactNode[] = [];
+  for (let i = 0; i < chat.length; i++) {
+    const m = chat[i];
+    const text = m.parts.map((p) => (p.kind === 'text' ? p.text : '')).join(' ');
+    if (m.kind === 'command' && m.role === 'user') {
+      const reply = chat[i + 1]?.kind === 'command' && chat[i + 1].role === 'assistant' ? chat[++i] : null;
+      rows.push(
+        <div key={m.id} className="chat-cmd">
+          <code>/{text}</code>
+          {reply && <span>{reply.parts.map((p) => (p.kind === 'text' ? p.text : '')).join(' ')}</span>}
+        </div>,
+      );
+    } else if (m.kind === 'command') {
+      rows.push(
+        <div key={m.id} className="chat-cmd">
+          <span>{text}</span>
+        </div>,
+      );
+    } else if (m.role === 'user') {
+      rows.push(
+        <div key={m.id} className="chat-msg chat-user">
+          <div className="chat-bubble">{text}</div>
+          {(m.fen || m.context?.length) && <div className="chat-meta">{m.fen ? 'about this position' : `with the game so far · ${m.context!.length} plies`}</div>}
+        </div>,
+      );
+    } else {
+      const isLast = m === lastAnswer;
+      rows.push(
+        <div key={m.id} className={`chat-msg chat-bot ${m.done ? '' : 'is-streaming'}`}>
+          <div className="chat-bubble">{renderAnswer(m)}</div>
+          {(m.stopped || (isLast && m.msPerToken)) && (
+            <div className="chat-meta" data-testid={isLast ? 'chessmind-latency' : undefined}>
+              {m.stopped && 'stopped'}
+              {m.stopped && isLast && m.msPerToken ? ' · ' : ''}
+              {isLast && m.msPerToken
+                ? `${m.tokens} tokens (max ${CHAT_MAX_TOKENS + (info?.thinking && settings.think !== 'off' ? CHAT_MAX_THINK_TOKENS + 2 : 0)}) · ${m.msPerToken.toFixed(0)} ms/token${m.prefillMs !== undefined ? ` · first ${m.prefillMs.toFixed(0)} ms` : ''}`
+                : ''}
             </div>
           )}
-          {model?.description && <p className="hint engine-desc">{model.description}</p>}
-          <details className="cm-advanced">
-            <summary>Advanced</summary>
-            <label>
-              Move context for predictions
-              <select
-                value={String(settings.contextPlies)}
-                disabled={!!info && !info.manifest.boards}
-                onChange={(e) => update({ contextPlies: e.target.value === 'full' ? 'full' : (Number(e.target.value) as 8 | 16 | 32) })}
-                data-testid="chessmind-context"
-              >
-                <option value="full">full game</option>
-                <option value="8">last 8 plies + board</option>
-                <option value="16">last 16 plies + board</option>
-                <option value="32">last 32 plies + board</option>
-              </select>
-            </label>
-            <p className="hint engine-desc">
-              {info && !info.manifest.boards
-                ? 'This model has no board input, so it always reads the full game.'
-                : 'Board-input models see the current position directly, so a short move history keeps deep branches fast.'}
-            </p>
-          </details>
+        </div>,
+      );
+    }
+  }
+
+  const statusDot = status === 'ready' ? (chatBusy ? 'busy' : 'on') : status === 'loading' ? 'busy' : status === 'error' ? 'err' : '';
+
+  return (
+    <div className="chat" data-testid="chessmind-panel" data-status={status}>
+      <header className="chat-head">
+        <span className="chat-title">
+          <span className={`status-dot ${statusDot}`} aria-hidden />
+          ChessMind
+        </span>
+        <span className="chat-status" data-testid="chessmind-status" title={loadedTitle}>
+          {statusText}
+        </span>
+        <span className="chat-head-tools">
+          {chat.length > 0 && (
+            <button
+              className="btn btn-ghost btn-icon btn-sm"
+              onClick={() => {
+                cm.detach();
+                setPlaying(null);
+                dispatch({ type: 'CHAT_CLEAR' });
+              }}
+              title="Clear the conversation"
+              aria-label="Clear the conversation"
+              data-testid="chessmind-clear"
+            >
+              <Eraser size={14} />
+            </button>
+          )}
+          <ChessMindSettings cm={cm} />
+        </span>
+      </header>
+      {settings.enabled && status === 'loading' && (
+        <div className="chat-progress">
+          <ProgressBar value={progress && progress.phase === 'download' && progress.total ? (progress.loaded / progress.total) * 100 : null} />
         </div>
       )}
-
-      {settings.enabled && status === 'loading' && progress && (
-        <progress className="cm-progress" max={progress.total} value={progress.phase === 'compile' ? undefined : progress.loaded} />
+      {settings.enabled && modelsError && <p className="error chat-error">{modelsError}</p>}
+      {settings.enabled && error && (
+        <p className="error chat-error" data-testid="chessmind-error">
+          {error}
+        </p>
       )}
-      {settings.enabled && modelsError && <p className="error">{modelsError}</p>}
-      {settings.enabled && error && <p className="error" data-testid="chessmind-error">{error}</p>}
 
-      {settings.enabled && status === 'ready' && (
+      {!settings.enabled ? (
+        <div className="chat-intro">
+          <span className="chat-intro-icon">
+            <Bot size={16} strokeWidth={1.75} />
+          </span>
+          <div className="chat-intro-text">
+            <strong>Load the model to chat</strong>
+            <span>Runs in this browser: it predicts moves, answers questions about the game and drives the board.</span>
+          </div>
+          <button className="btn btn-sm btn-primary" onClick={() => update({ enabled: true })} data-testid="chessmind-enable">
+            Load{model ? ` · ${model.sizeMb} MB` : ''}
+          </button>
+        </div>
+      ) : (
         <>
-          <div className="cm-section-head">
-            <span>Predicted move</span>
-            <span className="cm-head-tools">
-              {pinned.length > 0 ? (
-                <button className="cm-link" onClick={unpinArrows} data-testid="chessmind-unpin">unpin arrows</button>
-              ) : (
-                <button className="cm-link" onClick={pinArrows} disabled={!prediction?.moves.length} data-testid="chessmind-pin" title="Save these arrows on this position">pin arrows</button>
-              )}
-              <label className="cm-inline">
-                <input type="checkbox" checked={settings.arrows} onChange={(e) => update({ arrows: e.target.checked })} data-testid="chessmind-arrows" /> live arrows
-              </label>
-            </span>
-          </div>
-          {!standardStart ? (
-            <p className="hint engine-desc">ChessMind follows games from the initial position; this game starts from a custom FEN.</p>
-          ) : (
-            <ol className="engine-lines" data-testid="chessmind-predictions">
-              {prediction === null && <li className="hint engine-desc">Thinking…</li>}
-              {prediction?.moves.length === 0 && <li className="hint engine-desc">No legal moves.</li>}
-              {prediction?.moves.map((m) => (
-                <li key={m.uci} className="engine-line">
-                  <button className="engine-score cm-move" data-uci={m.uci} title="Play this move" onClick={() => onPlayUci(m.uci)}>
-                    {uciToSan(fen, m.uci)}
-                  </button>
-                  <span className="cm-bar"><span style={{ width: `${Math.round(m.p * 100)}%` }} /></span>
-                  <span className="cm-prob">{(m.p * 100).toFixed(1)}%</span>
-                </li>
-              ))}
-            </ol>
-          )}
-          {prediction && prediction.moves.length > 0 && (
-            <p className="hint engine-desc">{prediction.tokens} tokens · {prediction.ms.toFixed(0)} ms per prediction</p>
-          )}
-        </>
-      )}
-
-      {settings.enabled && (
-        <div className="cm-chat">
-          <div className="cm-section-head">
-            <span>Ask ChessMind</span>
-            {chat.length > 0 && (
-              <button
-                className="cm-link"
-                onClick={() => {
-                  cm.detach();
-                  setPlaying(null);
-                  dispatch({ type: 'CHAT_CLEAR' });
-                }}
-              >
-                clear chat
-              </button>
-            )}
-          </div>
-          <div className="cm-transcript" data-testid="chessmind-chat" ref={transcriptRef}>
-            {chat.map((m) => (
-              <div key={m.id} className={`cm-msg cm-${m.role} cm-kind-${m.kind}`}>
-                {m.role === 'user' ? (
-                  <>
-                    {m.parts.map((p) => (p.kind === 'text' ? p.text : '')).join(' ')}
-                    {m.fen ? <span className="cm-fen"> (this position)</span> : m.context?.length ? <span className="cm-fen"> (after {m.context.length} plies)</span> : null}
-                  </>
-                ) : (
-                  renderAnswer(m)
-                )}
-                {m.role === 'assistant' && m.stopped && <span className="cm-fen"> (stopped)</span>}
+          {above}
+          <div className="chat-transcript" data-testid="chessmind-chat" ref={transcriptRef}>
+            {chat.length === 0 ? (
+              <div className="chat-empty">
+                <p className="chat-empty-title">Ask about this position</p>
+                <div className="chat-suggest">
+                  {SUGGESTIONS.map((s) => (
+                    <button key={s} className="chat-suggestion" onClick={() => send(s)} disabled={chatBusy} data-testid="chessmind-suggestion">
+                      {s}
+                    </button>
+                  ))}
+                </div>
+                <p className="chat-empty-hint">
+                  Lines in answers are clickable. Type <kbd>/</kbd> for board commands.
+                </p>
               </div>
-            ))}
+            ) : (
+              rows
+            )}
           </div>
           <form
-            className="cm-ask"
+            className="chat-composer"
             onSubmit={(e) => {
               e.preventDefault();
-              submit();
+              if (slashOpen) pickSlash(slashItems[sel]);
+              else send(prompt);
             }}
           >
-            <input
-              type="text"
-              value={prompt}
-              placeholder={status === 'ready' ? 'Ask, or type a command (e.g. back 2)' : 'Type a board command (e.g. back 2)'}
-              onChange={(e) => setPrompt(e.target.value)}
-              data-testid="chessmind-prompt"
-            />
-            {chatBusy ? (
-              <button type="button" className="button" onClick={cm.stop}>Stop</button>
-            ) : (
-              <button type="submit" className="button" disabled={!prompt.trim()}>Ask</button>
+            {slashOpen && (
+              <div className="slash-menu" role="listbox" aria-label="Board commands" data-testid="chessmind-slash">
+                {slashItems.map((c, i) => (
+                  <button
+                    type="button"
+                    key={c.insert}
+                    role="option"
+                    aria-selected={i === sel}
+                    className={`slash-item ${i === sel ? 'sel' : ''}`}
+                    onMouseEnter={() => setSlashSel(i)}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => pickSlash(c)}
+                  >
+                    <code>/{c.insert.trim()}</code>
+                    <span>{c.desc}</span>
+                  </button>
+                ))}
+              </div>
             )}
+            <div className="chat-input">
+              <textarea
+                ref={inputRef}
+                rows={1}
+                value={prompt}
+                placeholder={status === 'ready' ? 'Ask ChessMind…' : 'Type / for board commands'}
+                onChange={(e) => {
+                  setPrompt(e.target.value);
+                  setSlashSel(0);
+                }}
+                onKeyDown={(e) => {
+                  if (slashOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                    e.preventDefault();
+                    setSlashSel((sel + (e.key === 'ArrowDown' ? 1 : -1) + slashItems.length) % slashItems.length);
+                  } else if (slashOpen && e.key === 'Tab') {
+                    e.preventDefault();
+                    setPrompt(`/${slashItems[sel].insert}`);
+                  } else if (e.key === 'Escape' && prompt) {
+                    e.stopPropagation();
+                    setPrompt('');
+                  } else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    e.currentTarget.form?.requestSubmit();
+                  }
+                }}
+                aria-label="Message ChessMind"
+                data-testid="chessmind-prompt"
+              />
+              {chatBusy ? (
+                <button type="button" className="chat-send stop" onClick={cm.stop} title="Stop the answer" aria-label="Stop" data-testid="chessmind-stop">
+                  <StopIcon size={12} fill="currentColor" />
+                </button>
+              ) : (
+                <button type="submit" className="chat-send" disabled={!prompt.trim()} title="Send (Enter)" aria-label="Send" data-testid="chessmind-send">
+                  <ArrowUp size={15} strokeWidth={2.2} />
+                </button>
+              )}
+            </div>
           </form>
-          <p className="cm-hint">{COMMAND_HINT}</p>
-          <div className="cm-options">
-            <label className="cm-inline" title="Append the moves that led to this position to your question">
-              <input type="checkbox" checked={settings.sendMoves} onChange={(e) => update({ sendMoves: e.target.checked })} /> send game moves
-            </label>
-            <label className="cm-inline" title="Send a board snapshot; lines in the answer continue from this position">
-              <input type="checkbox" checked={settings.aboutPosition} onChange={(e) => update({ aboutPosition: e.target.checked })} /> lines from this position
-            </label>
-            {info?.thinking && (
-              <label className="cm-inline cm-think-mode" title={`Hidden reasoning before the answer (up to ${CHAT_MAX_THINK_TOKENS} tokens): always, the model's choice, or never`}>
-                Think
-                <select value={settings.think} onChange={(e) => update({ think: e.target.value as typeof settings.think })} data-testid="chessmind-think-mode">
-                  <option value="on">on</option>
-                  <option value="auto">auto</option>
-                  <option value="off">off</option>
-                </select>
-              </label>
-            )}
-          </div>
-          {lastAnswer && (
-            <p className="hint engine-desc" data-testid="chessmind-latency">
-              {lastAnswer.tokens} tokens (max {CHAT_MAX_TOKENS + (info?.thinking && settings.think !== 'off' ? CHAT_MAX_THINK_TOKENS + 2 : 0)}) · {lastAnswer.msPerToken!.toFixed(0)} ms/token
-              {lastAnswer.prefillMs !== undefined ? ` · first ${lastAnswer.prefillMs.toFixed(0)} ms` : ''}
-            </p>
-          )}
-        </div>
+        </>
       )}
     </div>
+  );
+}
+
+function Typing() {
+  return (
+    <span className="chat-typing" aria-label="Writing">
+      <i />
+      <i />
+      <i />
+    </span>
   );
 }

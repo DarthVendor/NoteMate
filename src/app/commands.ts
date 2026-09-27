@@ -1,17 +1,18 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronFirst, ChevronLast, ClipboardCopy, Cpu, Eraser, FilePlus2, FlipVertical2,
-  Keyboard, LayoutTemplate, Moon, MessageSquareText, Palette, PanelsTopLeft, RotateCcw, StickyNote, Sun, SunMoon, Upload,
+  Keyboard, LayoutTemplate, Moon, MessageSquareText, Palette, PanelsTopLeft, RotateCcw, StickyNote, Sun, SunMoon, Swords, Upload, Wrench,
 } from 'lucide-react';
 import type { AppCtx } from './AppContext';
 import { allPanels } from '../workspace/registry';
 import { hidePanel, isVisible, PRESETS, type PresetId } from '../workspace/layout';
 import { BOARD_THEMES } from '../ui/settings';
+import { FOCUS_CHAT_EVENT } from '../analysis/AnalysisPanel';
 
 export interface Command {
   id: string;
   title: string;
-  group: 'Navigate' | 'Board' | 'Game' | 'Panels' | 'Layout' | 'Appearance' | 'Help';
+  group: 'Navigate' | 'Board' | 'Game' | 'Panels' | 'Layout' | 'Appearance' | 'Help' | 'Developer';
   icon?: LucideIcon;
   /** Keys for the shortcut, e.g. ['Mod', 'k'] or ['ArrowLeft']. The first entry of `shortcuts` is shown in menus. */
   shortcuts?: string[][];
@@ -30,7 +31,7 @@ export function buildCommands(ctx: AppCtx): Command[] {
     { id: 'nav.prevVar', title: 'Previous variation', group: 'Navigate', icon: ArrowUp, shortcuts: [['ArrowUp']], keywords: 'alternative sibling branch', run: () => dispatch({ type: 'SIBLING', delta: -1 }) },
     { id: 'nav.nextVar', title: 'Next variation', group: 'Navigate', icon: ArrowDown, shortcuts: [['ArrowDown']], keywords: 'alternative sibling branch', run: () => dispatch({ type: 'SIBLING', delta: 1 }) },
     { id: 'board.flip', title: 'Flip board', group: 'Board', icon: FlipVertical2, shortcuts: [['f']], keywords: 'orientation rotate', run: ctx.flip },
-    { id: 'board.clear', title: 'Clear arrows and highlights', group: 'Board', icon: Eraser, shortcuts: [['x']], keywords: 'shapes circles', run: () => dispatch({ type: 'CLEAR_SHAPES' }) },
+    { id: 'board.clear', title: 'Clear arrows and highlights on this position', group: 'Board', icon: Eraser, shortcuts: [['x']], keywords: 'shapes circles erase', run: () => dispatch({ type: 'CLEAR_SHAPES' }) },
     { id: 'board.engine', title: ctx.engine.settings.enabled ? 'Turn engine off' : 'Turn engine on', group: 'Board', icon: Cpu, shortcuts: [['e']], keywords: 'stockfish analysis evaluation', run: () => ctx.engine.update({ enabled: !ctx.engine.settings.enabled }) },
     {
       id: 'game.note', title: 'Add a note to this position', group: 'Game', icon: StickyNote, shortcuts: [['n']], keywords: 'sticky comment annotate',
@@ -41,13 +42,18 @@ export function buildCommands(ctx: AppCtx): Command[] {
     },
     { id: 'game.import', title: 'Import PGN…', group: 'Game', icon: Upload, shortcuts: [['i']], keywords: 'load open chess.com chessbase file', run: ctx.openImport },
     { id: 'game.export', title: 'Copy game as PGN', group: 'Game', icon: ClipboardCopy, keywords: 'export clipboard save', run: () => ctx.exportPgn() },
+    { id: 'game.eraseLines', title: 'Erase side lines', group: 'Game', icon: Eraser, shortcuts: [['Shift', 'Backspace']], keywords: 'delete variations branches clean clear lines keep main line', run: () => ctx.erase('variations') },
+    { id: 'game.eraseArrows', title: 'Erase arrows and highlights (all positions)', group: 'Game', icon: Eraser, keywords: 'clear shapes circles drawings everywhere pinned', run: () => ctx.erase('shapes') },
+    { id: 'game.eraseAll', title: 'Erase side lines and arrows', group: 'Game', icon: Eraser, keywords: 'clear everything clean up variations shapes', run: () => ctx.erase('all') },
     { id: 'game.new', title: 'New game', group: 'Game', icon: FilePlus2, keywords: 'reset clear start over', run: ctx.newGame },
     {
       id: 'game.ask', title: 'Ask ChessMind…', group: 'Game', icon: MessageSquareText, shortcuts: [['/']], keywords: 'chat model question coach',
       run: () => {
-        ctx.revealPanel('chessmind');
+        // The chat lives in the Analysis panel unless a layout shows the standalone ChessMind panel.
+        ctx.revealPanel(isVisible(layout.layout, 'chessmind') && !isVisible(layout.layout, 'analysis') ? 'chessmind' : 'analysis');
+        window.dispatchEvent(new Event(FOCUS_CHAT_EVENT));
         if (!ctx.chessmind.settings.enabled) ctx.chessmind.update({ enabled: true });
-        setTimeout(() => document.querySelector<HTMLInputElement>('[data-testid=chessmind-prompt]')?.focus(), 60);
+        setTimeout(() => document.querySelector<HTMLTextAreaElement>('[data-testid=chessmind-prompt]')?.focus(), 60);
       },
     },
   ];
@@ -78,6 +84,20 @@ export function buildCommands(ctx: AppCtx): Command[] {
     { id: 'theme.toggle', title: 'Toggle light / dark', group: 'Appearance', icon: SunMoon, shortcuts: [['t']], run: () => ctx.updateUi({ theme: document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark' }) },
   );
   for (const b of BOARD_THEMES) cmds.push({ id: `board.theme.${b.id}`, title: `Board: ${b.name}`, group: 'Appearance', icon: Palette, keywords: 'colour color squares', run: () => ctx.updateUi({ boardTheme: b.id }) });
+
+  cmds.push(
+    {
+      id: 'dev.tools', title: ctx.ui.devTools ? 'Developer: turn developer tools off' : 'Developer: turn developer tools on', group: 'Developer', icon: Wrench,
+      keywords: 'debug simulate settings', run: () => ctx.updateUi({ devTools: !ctx.ui.devTools }),
+    },
+    {
+      id: 'dev.simulate', title: 'Developer: Simulate vs Stockfish', group: 'Developer', icon: Swords, keywords: 'elo strength match test model engine',
+      run: () => {
+        ctx.updateUi({ devTools: true });
+        ctx.revealPanel('simulate');
+      },
+    },
+  );
 
   cmds.push(
     { id: 'help.palette', title: 'Command palette', group: 'Help', icon: Keyboard, shortcuts: [['Mod', 'k']], run: ctx.openPalette },

@@ -1,3 +1,4 @@
+import { Pause, Play, Settings2, Square, StepForward } from 'lucide-react';
 import type { useSimulate, SimGame } from './useSimulate';
 import { limitLabel } from './useSimulate';
 import { eloDiffFromScore, skillElo } from './elo';
@@ -5,6 +6,8 @@ import type { useChessMind } from '../chessmind/useChessMind';
 import type { GameAction } from '../state/gameReducer';
 import { toPgn } from '../state/gameReducer';
 import { ROOT_ID, type GameState, type MoveNode } from '../types';
+import { keepArrows } from '../ui/keepArrows';
+import { MenuLabel, Popover } from '../ui/Popover';
 
 interface Props {
   sim: ReturnType<typeof useSimulate>;
@@ -67,116 +70,155 @@ export function SimulatePanel({ sim, cm, state, dispatch, onExport }: Props) {
     return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : fallback;
   };
 
+  const colorLabel = s.modelColor === 'alternate' ? 'alternating colours' : `as ${s.modelColor === 'white' ? 'White' : 'Black'}`;
+  const running = phase === 'running' || phase === 'loading';
+
   return (
-    <div className="engine-panel sim-panel" data-testid="sim-panel">
-      <header className="engine-header">
-        <span className="sim-title">ChessMind vs Stockfish</span>
-        <span className={`engine-status ${busy ? 'status-ready' : ''}`} data-testid="sim-status">
-          {busy && <span className="status-dot on" aria-hidden />}
+    <div className="sim-panel" data-testid="sim-panel">
+      <header className="sim-head">
+        <span className="sim-title">
+          ChessMind vs Stockfish <span className="sim-dev">dev</span>
+        </span>
+        <span className={`sim-status ${busy ? 'is-busy' : ''}`} data-testid="sim-status">
+          {busy && <span className={`status-dot ${phase === 'paused' ? 'busy' : 'on'}`} aria-hidden />}
           {phase === 'idle' ? (games.length ? `${t.w}W ${t.d}D ${t.l}L` : 'idle') : phase === 'loading' ? 'starting…' : phase}
         </span>
       </header>
 
-      {(
-        <>
-          {!modelReady && (
-            <p className="hint engine-desc" data-testid="sim-model-hint">
-              {cm.settings.enabled ? (
-                cm.status === 'loading' ? 'The ChessMind model is loading…' : 'Load a model first (ChessMind panel).'
-              ) : (
-                <>
-                  Load a model first.{' '}
-                  <button className="cm-link" onClick={() => cm.update({ enabled: true })} data-testid="sim-enable-model">
-                    Turn on ChessMind
-                  </button>
-                </>
-              )}
-            </p>
+      <div className="sim-setup">
+        <p className="sim-summary" data-testid="sim-summary">
+          ChessMind <b>{colorLabel}</b>, {s.choice === 'sample' ? `sampling at ${s.temperature.toFixed(2)}` : 'most likely move'} vs Stockfish <b>skill {s.skill}</b>{' '}
+          <span className="faint">(≈{skillElo(s.skill)})</span> at {limitLabel(s)}/move · <b>{s.games}</b> game{s.games === 1 ? '' : 's'} from the {s.start === 'current' ? 'current' : 'initial'} position
+        </p>
+        <Popover
+          label="Simulation setup"
+          width={340}
+          trigger={(p) => (
+            <button {...p} className="btn btn-sm" disabled={busy} data-testid="sim-edit">
+              <Settings2 size={13} /> Edit
+            </button>
           )}
-          <fieldset className="engine-controls sim-controls" disabled={busy}>
-            <div className="sim-grid">
-              <label>
-                ChessMind plays
-                <select value={s.modelColor} onChange={(e) => update({ modelColor: e.target.value as typeof s.modelColor })} data-testid="sim-color">
-                  <option value="alternate">alternate colours</option>
-                  <option value="white">White</option>
-                  <option value="black">Black</option>
-                </select>
-              </label>
-              <label>
-                Model move
-                <select value={s.choice} onChange={(e) => update({ choice: e.target.value as typeof s.choice })} data-testid="sim-choice">
-                  <option value="argmax">most likely (argmax)</option>
-                  <option value="sample">sample</option>
-                </select>
-              </label>
-              {s.choice === 'sample' && (
-                <label>
-                  Temperature {s.temperature.toFixed(2)}
-                  <input type="range" min={0.3} max={1} step={0.05} value={s.temperature} onChange={(e) => update({ temperature: Number(e.target.value) })} data-testid="sim-temp" />
-                </label>
-              )}
-              <label>
-                Stockfish skill (0–20)
-                <input type="number" min={0} max={20} value={s.skill} onChange={(e) => update({ skill: num(e.target.value, 0, 20, 3) })} data-testid="sim-skill" />
-              </label>
-              <label className="sim-wide">
-                Stockfish limit
-                <span className="sim-pair">
-                  <select value={s.limitKind} onChange={(e) => update({ limitKind: e.target.value as typeof s.limitKind })} data-testid="sim-limit-kind">
-                    <option value="movetime">ms / move</option>
-                    <option value="nodes">nodes / move</option>
-                  </select>
-                  {s.limitKind === 'movetime' ? (
-                    <input type="number" min={1} max={60000} value={s.movetime} onChange={(e) => update({ movetime: num(e.target.value, 1, 60000, 100) })} data-testid="sim-limit" />
-                  ) : (
-                    <input type="number" min={1} max={100000000} value={s.nodes} onChange={(e) => update({ nodes: num(e.target.value, 1, 1e8, 5000) })} data-testid="sim-limit" />
+        >
+          {() => (
+            <div className="pop-form" tabIndex={0} onKeyDown={keepArrows}>
+              <MenuLabel>Simulation setup</MenuLabel>
+              <fieldset className="sim-controls" disabled={busy}>
+                <div className="sim-grid">
+                  <label>
+                    ChessMind plays
+                    <select value={s.modelColor} onChange={(e) => update({ modelColor: e.target.value as typeof s.modelColor })} data-testid="sim-color">
+                      <option value="alternate">alternate colours</option>
+                      <option value="white">White</option>
+                      <option value="black">Black</option>
+                    </select>
+                  </label>
+                  <label>
+                    Model move
+                    <select value={s.choice} onChange={(e) => update({ choice: e.target.value as typeof s.choice })} data-testid="sim-choice">
+                      <option value="argmax">most likely (argmax)</option>
+                      <option value="sample">sample</option>
+                    </select>
+                  </label>
+                  {s.choice === 'sample' && (
+                    <label>
+                      Temperature {s.temperature.toFixed(2)}
+                      <input type="range" min={0.3} max={1} step={0.05} value={s.temperature} onChange={(e) => update({ temperature: Number(e.target.value) })} data-testid="sim-temp" />
+                    </label>
                   )}
-                </span>
-              </label>
-              <label>
-                Start from
-                <select value={s.start} onChange={(e) => update({ start: e.target.value as typeof s.start })} data-testid="sim-start-pos">
-                  <option value="current">current position</option>
-                  <option value="initial">initial position</option>
-                </select>
-              </label>
-              <label>
-                Games (1–50)
-                <input type="number" min={1} max={50} value={s.games} onChange={(e) => update({ games: num(e.target.value, 1, 50, 4) })} data-testid="sim-games" />
-              </label>
-              <label>
-                Move delay (ms)
-                <input type="number" min={0} max={1000} step={50} value={s.delay} onChange={(e) => update({ delay: num(e.target.value, 0, 1000, 300) })} data-testid="sim-delay" />
-              </label>
-              <label>
-                Max plies
-                <input type="number" min={2} max={2000} value={s.maxPlies} onChange={(e) => update({ maxPlies: num(e.target.value, 2, 2000, 300) })} data-testid="sim-max-plies" />
-              </label>
+                  <label>
+                    Stockfish skill (0–20)
+                    <input type="number" min={0} max={20} value={s.skill} onChange={(e) => update({ skill: num(e.target.value, 0, 20, 3) })} data-testid="sim-skill" />
+                  </label>
+                  <label className="sim-wide">
+                    Stockfish limit
+                    <span className="sim-pair">
+                      <select value={s.limitKind} onChange={(e) => update({ limitKind: e.target.value as typeof s.limitKind })} data-testid="sim-limit-kind">
+                        <option value="movetime">ms / move</option>
+                        <option value="nodes">nodes / move</option>
+                      </select>
+                      {s.limitKind === 'movetime' ? (
+                        <input type="number" min={1} max={60000} value={s.movetime} onChange={(e) => update({ movetime: num(e.target.value, 1, 60000, 100) })} data-testid="sim-limit" />
+                      ) : (
+                        <input type="number" min={1} max={100000000} value={s.nodes} onChange={(e) => update({ nodes: num(e.target.value, 1, 1e8, 5000) })} data-testid="sim-limit" />
+                      )}
+                    </span>
+                  </label>
+                  <label>
+                    Start from
+                    <select value={s.start} onChange={(e) => update({ start: e.target.value as typeof s.start })} data-testid="sim-start-pos">
+                      <option value="current">current position</option>
+                      <option value="initial">initial position</option>
+                    </select>
+                  </label>
+                  <label>
+                    Games (1–50)
+                    <input type="number" min={1} max={50} value={s.games} onChange={(e) => update({ games: num(e.target.value, 1, 50, 4) })} data-testid="sim-games" />
+                  </label>
+                  <label>
+                    Move delay (ms)
+                    <input type="number" min={0} max={1000} step={50} value={s.delay} onChange={(e) => update({ delay: num(e.target.value, 0, 1000, 300) })} data-testid="sim-delay" />
+                  </label>
+                  <label>
+                    Max plies
+                    <input type="number" min={2} max={2000} value={s.maxPlies} onChange={(e) => update({ maxPlies: num(e.target.value, 2, 2000, 300) })} data-testid="sim-max-plies" />
+                  </label>
+                </div>
+              </fieldset>
+              <p className="field-hint">
+                Opponent: a separate Stockfish ({sim.engineName || 'the analysis engine’s build, else Lite'}) with Threads 1. Each game is a new variation with notes on its first and last moves.
+              </p>
             </div>
-          </fieldset>
+          )}
+        </Popover>
+      </div>
 
-          <div className="sim-buttons">
-            {!busy ? (
-              <button className="button btn-primary" onClick={sim.start} data-testid="sim-start">Start</button>
-            ) : phase === 'paused' ? (
-              <button className="button" onClick={sim.resume} data-testid="sim-resume">Resume</button>
-            ) : (
-              <button className="button" onClick={sim.pause} disabled={phase === 'loading'} data-testid="sim-pause">Pause</button>
-            )}
-            <button className="button" onClick={sim.step} disabled={phase === 'loading'} data-testid="sim-step" title="Play one move">Step</button>
-            <button className="button" onClick={sim.stop} disabled={!busy} data-testid="sim-stop">Stop</button>
-          </div>
+      {!modelReady && (
+        <p className="sim-note" data-testid="sim-model-hint">
+          {cm.settings.enabled ? (
+            cm.status === 'loading' ? 'The ChessMind model is loading…' : 'Load a ChessMind model first.'
+          ) : (
+            <>
+              Load a ChessMind model first.{' '}
+              <button className="btn btn-sm" onClick={() => cm.update({ enabled: true })} data-testid="sim-enable-model">
+                Load model
+              </button>
+            </>
+          )}
+        </p>
+      )}
+
+      <div className="sim-buttons">
+        {!busy ? (
+          <button className="btn btn-sm btn-primary" onClick={sim.start} data-testid="sim-start">
+            <Play size={12} /> Start
+          </button>
+        ) : phase === 'paused' ? (
+          <button className="btn btn-sm btn-primary" onClick={sim.resume} data-testid="sim-resume">
+            <Play size={12} /> Resume
+          </button>
+        ) : (
+          <button className="btn btn-sm" onClick={sim.pause} disabled={phase === 'loading'} data-testid="sim-pause">
+            <Pause size={12} /> Pause
+          </button>
+        )}
+        <button className="btn btn-sm btn-ghost" onClick={sim.step} disabled={phase === 'loading'} data-testid="sim-step" title="Play one move">
+          <StepForward size={12} /> Step
+        </button>
+        <button className="btn btn-sm btn-ghost" onClick={sim.stop} disabled={!busy} data-testid="sim-stop">
+          <Square size={11} /> Stop
+        </button>
+        {running && <span className="spinner" aria-hidden />}
+      </div>
 
           {live && (
-            <p className="hint engine-desc" data-testid="sim-live">
+            <p className="sim-live" data-testid="sim-live">
               {live.game > 0 && phase !== 'idle' ? `Game ${live.game}/${live.total} · ply ${live.ply} · ChessMind ${live.modelColor === 'w' ? 'White' : 'Black'} · ` : ''}
               {live.message}
             </p>
           )}
           {error && <p className="error" data-testid="sim-error">{error}</p>}
           {(latency.model.length > 0 || latency.engine.length > 0) && (
-            <p className="hint engine-desc" data-testid="sim-latency">
+            <p className="sim-meta" data-testid="sim-latency">
               ChessMind {avg(latency.modelWall).toFixed(0)} ms/move (model {avg(latency.model).toFixed(0)} ms, {latency.model.length} moves) · Stockfish{' '}
               {avg(latency.engine).toFixed(0)} ms/move{sim.engineName ? ` (${sim.engineName})` : ''}
             </p>
@@ -206,7 +248,7 @@ export function SimulatePanel({ sim, cm, state, dispatch, onExport }: Props) {
                   ))}
                 </tbody>
               </table>
-              <p className="hint engine-desc">
+              <p className="sim-meta">
                 {games.length} game{games.length === 1 ? '' : 's'} · average {avgPlies.toFixed(0)} plies
                 {elo !== null && (
                   <>
@@ -214,7 +256,7 @@ export function SimulatePanel({ sim, cm, state, dispatch, onExport }: Props) {
                   </>
                 )}
               </p>
-              <p className="cm-hint">
+              <p className="sim-meta faint">
                 Elo uses ChessMind's approximate Skill Level table (a community mapping for timed play; at short limits Stockfish is weaker), so treat it as a scale, not a rating. The score includes one virtual draw.
               </p>
               <ol className="sim-games" data-testid="sim-games-list">
@@ -222,14 +264,14 @@ export function SimulatePanel({ sim, cm, state, dispatch, onExport }: Props) {
                   const alive = g.firstId !== null && !!state.nodes[g.firstId];
                   return (
                     <li key={i} data-result={g.result} data-plies={g.plies} data-first-id={g.firstId ?? ''} data-last-id={g.lastId} data-uci={g.moves.join(' ')} data-start-fen={g.startFen}>
-                      <button className="cm-link" disabled={!alive} onClick={() => g.firstId && dispatch({ type: 'GOTO', id: g.firstId })} title="Jump to this game's branch">
+                      <button className="link-btn" disabled={!alive} onClick={() => g.firstId && dispatch({ type: 'GOTO', id: g.firstId })} title="Jump to this game's branch">
                         #{i + 1} {g.modelColor === 'w' ? 'CM–SF' : 'SF–CM'} {g.result}
                       </button>{' '}
-                      <span className="cm-fen">
+                      <span className="faint">
                         {g.score === 1 ? 'win' : g.score === 0 ? 'loss' : 'draw'} · {g.reason} · {g.plies} plies
                       </span>
                       {alive && (
-                        <button className="cm-link sim-end" onClick={() => dispatch({ type: 'GOTO', id: g.lastId })} title="Jump to the final position">
+                        <button className="link-btn sim-end" onClick={() => dispatch({ type: 'GOTO', id: g.lastId })} title="Jump to the final position">
                           end
                         </button>
                       )}
@@ -238,16 +280,11 @@ export function SimulatePanel({ sim, cm, state, dispatch, onExport }: Props) {
                 })}
               </ol>
               <div className="sim-buttons">
-                <button className="cm-link" onClick={() => onExport(games.map(gamePgn).join('\n'))} data-testid="sim-export">Export PGN</button>
-                <button className="cm-link" onClick={sim.clear} disabled={busy}>Clear scoreboard</button>
+                <button className="link-btn" onClick={() => onExport(games.map(gamePgn).join('\n'))} data-testid="sim-export">Export PGN</button>
+                <button className="link-btn" onClick={sim.clear} disabled={busy}>Clear scoreboard</button>
               </div>
             </div>
           )}
-          <p className="cm-hint">
-            Opponent: a separate Stockfish ({sim.engineName || 'the analysis panel’s build, else Lite'}) with Threads 1, {limitLabel(s)} per move. Each game is a new variation from the start position with notes on its first and last moves.
-          </p>
-        </>
-      )}
     </div>
   );
 }

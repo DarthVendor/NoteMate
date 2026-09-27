@@ -10,5 +10,6 @@ const KEY_LABEL: Record<string, string> = {
   ArrowDown: '↓',
   Enter: '↵',
   Escape: 'Esc',
+  Backspace: isApple ? '⌫' : 'Backspace',
 };
 export const keyLabel = (k: string) => KEY_LABEL[k] ?? (k.length === 1 ? k.toUpperCase() : k);

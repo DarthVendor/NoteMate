@@ -15,6 +15,8 @@ export interface UiSettings {
   motion: MotionPref;
   /** Show the one-line help strip under the board. */
   boardHints: boolean;
+  /** Developer tools (the Simulate panel: ChessMind vs Stockfish with an Elo estimate). */
+  devTools: boolean;
 }
 
 export const DEFAULT_UI: UiSettings = {
@@ -25,6 +27,7 @@ export const DEFAULT_UI: UiSettings = {
   legalMoves: true,
   motion: 'normal',
   boardHints: true,
+  devTools: false,
 };
 
 export const BOARD_THEMES: { id: BoardTheme; name: string; light: string; dark: string }[] = [

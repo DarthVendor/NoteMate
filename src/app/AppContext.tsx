@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
 import type { Chess, Move } from 'chess.js';
-import type { GameAction } from '../state/gameReducer';
+import type { EraseScope, GameAction } from '../state/gameReducer';
 import type { Annotation, GameState } from '../types';
 import type { Orientation } from '../components/boardGeometry';
 import type { useEngine } from '../engine/useEngine';
@@ -8,6 +8,11 @@ import type { useChessMind } from '../chessmind/useChessMind';
 import type { useSimulate } from '../simulate/useSimulate';
 import type { UiSettings } from '../ui/settings';
 import type { LayoutApi } from '../workspace/useLayout';
+
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
 
 /** Everything a panel may need. Panels read it with `useApp()` instead of receiving props. */
 export interface AppCtx {
@@ -30,7 +35,10 @@ export interface AppCtx {
   layout: LayoutApi;
   /** Show a panel (placing it if hidden) and focus its tab. */
   revealPanel: (id: string) => void;
-  toast: (message: string) => void;
+  /** A short message at the bottom; with an action (e.g. Undo) it stays about 6 s. */
+  toast: (message: string, action?: ToastAction) => void;
+  /** Erase side lines, arrows + highlights everywhere, or both, with an Undo toast. */
+  erase: (scope: EraseScope) => void;
   openImport: () => void;
   exportPgn: (text?: string) => void;
   newGame: () => void;

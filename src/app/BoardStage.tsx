@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Copy, Eraser, FlipVertical2 } from 'lucide-react';
+import { ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Copy, FlipVertical2 } from 'lucide-react';
+import { EraseMenu } from '../components/EraseMenu';
 import { Board } from '../components/Board';
 import { EvalBar } from '../components/EvalBar';
 import type { Arrow, Square } from '../types';
@@ -44,7 +45,6 @@ export function BoardStage() {
   const status = statusLine(chess);
   const atStart = state.currentId === ROOT_ID;
   const atEnd = state.nodes[state.currentId].children.length === 0;
-  const hasShapes = annotation.arrows.length > 0 || annotation.highlights.length > 0;
 
   const copyFen = async () => {
     try {
@@ -124,9 +124,7 @@ export function BoardStage() {
         <button className="btn btn-ghost btn-icon" onClick={app.flip} title="Flip board (F)" aria-label="Flip board">
           <FlipVertical2 size={16} />
         </button>
-        <button className="btn btn-ghost btn-icon" onClick={() => dispatch({ type: 'CLEAR_SHAPES' })} disabled={!hasShapes} title="Clear arrows and highlights on this position (X)" aria-label="Clear arrows and highlights">
-          <Eraser size={16} />
-        </button>
+        <EraseMenu variant="icon" />
         <div className="fen-field" title="FEN of the current position">
           <span className="fen-label">FEN</span>
           <input className="fen" readOnly value={fen} onFocus={(e) => e.target.select()} aria-label="FEN of the current position" />

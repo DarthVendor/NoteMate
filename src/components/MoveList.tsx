@@ -96,7 +96,7 @@ function Line({
   return <>{items}</>;
 }
 
-export function MoveList({ state, dispatch, onImport }: Props & { onImport?: () => void }) {
+export function MoveList({ state, dispatch, onImport, tools }: Props & { onImport?: () => void; /** Extra toolbar controls (e.g. the Erase menu). */ tools?: React.ReactNode }) {
   const activeRef = useRef<HTMLButtonElement>(null);
   const { currentId } = state;
 
@@ -125,7 +125,7 @@ export function MoveList({ state, dispatch, onImport }: Props & { onImport?: () 
 
   return (
     <div className="move-list">
-      {currentId !== ROOT_ID && (
+      {(currentId !== ROOT_ID || (tools && firstMove)) && (
         <div className="line-tools" role="toolbar" aria-label="Variation tools">
           {siblingCount > 1 && (
             <button className="btn btn-ghost btn-sm" onClick={() => dispatch({ type: 'SIBLING', delta: 1 })} title="Switch to the next alternative (↑/↓)">
@@ -138,9 +138,12 @@ export function MoveList({ state, dispatch, onImport }: Props & { onImport?: () 
             </button>
           )}
           <span className="line-tools-spacer" />
-          <button className="btn btn-ghost btn-sm danger-text" onClick={() => dispatch({ type: 'DELETE_FROM', id: currentId })} title="Delete this move and everything after it">
-            <Trash2 size={13} /> Delete from here
-          </button>
+          {currentId !== ROOT_ID && (
+            <button className="btn btn-ghost btn-sm danger-text" onClick={() => dispatch({ type: 'DELETE_FROM', id: currentId })} title="Delete this move and everything after it">
+              <Trash2 size={13} /> Delete from here
+            </button>
+          )}
+          {tools}
         </div>
       )}
       <div className="moves" ref={movesRef}>

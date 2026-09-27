@@ -34,9 +34,19 @@ export type GameAction =
   | { type: 'CHAT_APPEND'; messages: ChatMessage[] }
   | { type: 'CHAT_PATCH'; id: string; patch: Partial<ChatMessage> }
   | { type: 'CHAT_CLEAR' }
+  /**
+   * Erase in one go (undo with RESTORE_TREE). 'variations': every side line, keeping the main line with its
+   * annotations; the board moves to the nearest main-line ancestor if its node goes. 'shapes': arrows and
+   * highlights (including pinned model arrows) on every position; notes stay. 'all': both.
+   */
+  | { type: 'ERASE'; scope: EraseScope }
+  /** Put back a move tree and position saved before an erase (the chat and game details stay as they are now). */
+  | { type: 'RESTORE_TREE'; nodes: GameState['nodes']; currentId: string }
   | { type: 'LOAD_PGN'; pgn: string }
   | { type: 'NEW_GAME' }
   | { type: 'REPLACE'; state: GameState };
+
+export type EraseScope = 'variations' | 'shapes' | 'all';
 
 export const initialGameState = (): GameState => ({
   version: 2,
@@ -91,6 +101,25 @@ export function isMainLine(state: GameState, id: string): boolean {
     node = parent;
   }
   return true;
+}
+
+/** Ids of the main line: the root and its first children all the way down. */
+export function mainLineIds(state: GameState): Set<string> {
+  const keep = new Set<string>([ROOT_ID]);
+  let node = state.nodes[ROOT_ID];
+  while (node?.children.length) {
+    node = state.nodes[node.children[0]];
+    if (!node) break;
+    keep.add(node.id);
+  }
+  return keep;
+}
+
+/** What an ERASE would remove: side-line moves, and arrows + highlights over all positions. */
+export function eraseCounts(state: GameState): { sideMoves: number; shapes: number } {
+  const all = Object.values(state.nodes);
+  const shapes = all.reduce((n, x) => n + (x.annotation ? x.annotation.arrows.length + x.annotation.highlights.length : 0), 0);
+  return { sideMoves: all.length - mainLineIds(state).size, shapes };
 }
 
 /**
@@ -291,6 +320,39 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       }));
     case 'DELETE_NOTE':
       return withAnnotation(state, (a) => ({ ...a, notes: a.notes.filter((n) => n.id !== action.id) }), action.nodeId);
+    case 'ERASE': {
+      let nodes = state.nodes;
+      let currentId = state.currentId;
+      const keep = mainLineIds(state);
+      if (action.scope !== 'shapes' && keep.size < Object.keys(state.nodes).length) {
+        nodes = {};
+        for (const id of keep) {
+          const node = state.nodes[id];
+          nodes[id] = node.children.length > 1 ? { ...node, children: node.children.slice(0, 1) } : node;
+        }
+        while (!keep.has(currentId)) currentId = state.nodes[currentId].parent ?? ROOT_ID;
+      }
+      const hasShapes = (n: MoveNode) => !!n.annotation && (n.annotation.arrows.length > 0 || n.annotation.highlights.length > 0);
+      if (action.scope !== 'variations' && Object.values(nodes).some(hasShapes)) {
+        const stripped: GameState['nodes'] = {};
+        for (const [id, node] of Object.entries(nodes)) {
+          const a = node.annotation;
+          if (!a || !hasShapes(node)) {
+            stripped[id] = node;
+            continue;
+          }
+          const next: MoveNode = { ...node };
+          if (a.notes.length) next.annotation = { ...a, arrows: [], highlights: [] };
+          else delete next.annotation;
+          stripped[id] = next;
+        }
+        nodes = stripped;
+      }
+      return nodes === state.nodes && currentId === state.currentId ? state : { ...state, nodes, currentId };
+    }
+    case 'RESTORE_TREE':
+      if (!action.nodes[ROOT_ID]) return state;
+      return { ...state, nodes: action.nodes, currentId: action.nodes[action.currentId] ? action.currentId : ROOT_ID };
     case 'LOAD_PGN': {
       try {
         return gameFromParsed(parsePgn(action.pgn));

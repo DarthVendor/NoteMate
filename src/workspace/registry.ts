@@ -22,10 +22,18 @@ export interface PanelDef {
   component: ComponentType;
   /** Optional live status shown in the tab (e.g. a running engine). */
   useStatus?: () => 'on' | 'busy' | 'err' | null;
+  /** Developer-only panel: listed (Panels menu, palette) only while Settings → Developer tools is on. */
+  dev?: boolean;
 }
 
 const panels = new Map<string, PanelDef>();
 const order: string[] = [];
+let devPanels = false;
+
+/** Show or hide developer panels in the listings (set from the UI settings on every render of the app). */
+export function setDevPanels(on: boolean): void {
+  devPanels = on;
+}
 
 export function registerPanel(def: PanelDef): void {
   if (!panels.has(def.id)) order.push(def.id);
@@ -33,4 +41,4 @@ export function registerPanel(def: PanelDef): void {
 }
 
 export const getPanel = (id: string): PanelDef | undefined => panels.get(id);
-export const allPanels = (): PanelDef[] => order.map((id) => panels.get(id)!);
+export const allPanels = (): PanelDef[] => order.map((id) => panels.get(id)!).filter((p) => devPanels || !p.dev);

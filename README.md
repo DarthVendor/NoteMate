@@ -31,21 +31,23 @@ In the app, set **Engine server** to `http://localhost:4174`. The setting is sav
 - **Move pieces** by dragging or click-click. Promotion shows a piece chooser. Moves animate; turn it down or off in Settings (and `prefers-reduced-motion` is respected).
 - **Arrows**: right-drag between squares. Right-click a square to circle it. Hold Shift (red), Alt (blue) or Ctrl (yellow) for other colours. Drawing the same shape again removes it.
 - **Sticky notes**: the Notes panel shows notes for the current position (`N` adds one). Notes on other positions are listed below and are clickable. Moves with notes or arrows get a small badge in the move list.
-- **Variations**: playing a different move from any position creates a branch. The Moves panel shows alternatives indented under the move they replace, with "Make main line" and "Delete from here" above the list. ↑/↓ switch between alternatives.
+- **Variations**: playing a different move from any position creates a branch. The move list shows alternatives indented under the move they replace, with "Make main line" and "Delete from here" above it. ↑/↓ switch between alternatives.
+- **Erase**: the Erase menu above the move list (also the eraser under the board) removes every side line (`Shift+⌫`; chat lines included, the main line and its notes stay), arrows and highlights on all positions, this position's marks (`X`), or everything. It acts at once; the message that follows has **Undo** for a few seconds.
 - **Navigation**: ← → Home End (or `J`/`K`), the buttons under the board, or click a move. `F` flips the board.
 - **Import / export**: Import (`I`) accepts pasted or dropped PGN or a `.pgn` file (chess.com and ChessBase both export PGN). Nested variations are imported and `{comments}` become sticky notes. "Copy PGN" writes the full tree back out with notes as comments.
-- **Engine**: start it from the Engine panel (or `E`). Engine settings (build, server, threads, lines, depth, hash) are under "Engine settings" there and in Settings. Click a line's score to play its first move. The blue arrow on the board is the engine's top move.
+- **Engine**: the strip at the top of the Analysis panel shows it on/off (or `E`), the evaluation, the best line (click it to play the first move) and the depth; the chevron shows every line (MultiPV), the sliders icon the settings (build, server, threads, lines, depth, hash; also in Settings). The blue arrow on the board is the engine's top move.
 - **Command palette**: `⌘K` / `Ctrl+K` runs any action (navigation, panels, layouts, theme, board colours). `?` lists every shortcut.
 
 ### Workspace
 
-The board sits in the middle; every other tool is a panel (Moves, Notes, Engine, ChessMind, Simulate, Settings) docked left, right or bottom.
+The board sits in the middle, Notes on the left and the **Analysis** panel on the right: the engine strip and ChessMind's predicted moves on top, the move tree, and the ChessMind chat below it (drag the divider between them). Everything follows the current position. Every tool is a panel docked left, right or bottom; Moves, Engine and ChessMind also exist as separate panels for custom layouts (Layout menu).
 
 - Drag a panel's tab onto another panel to tab them together, onto the top/bottom (or left/right) edge of a panel to split, or onto the "Dock left / right / bottom" strips that appear while dragging.
-- Each panel group's `⋯` menu docks, splits, reorders or hides it and adds hidden panels as tabs. The Layout menu in the top bar shows/hides panels and applies presets: **Study**, **Analysis**, **Play vs model**, **Coach**. "Reset layout" restores Study.
+- Each panel group's `⋯` menu docks, splits, reorders or hides it and adds hidden panels as tabs. The Layout menu in the top bar shows/hides panels and applies presets: **Study** (Notes, board, Analysis), **Analysis** (a wide Analysis panel with Notes as a tab), **Focus** (board and a slim Analysis column), **Coach** (a wider chat). "Reset layout" restores Study. Saved layouts that were an unedited preset move to the new arrangement automatically.
 - Drag the gaps between panels to resize (or focus them and use the arrow keys). Layout and sizes are saved in the browser.
 - **Settings** (`,`): theme (system / light / dark), board colours, piece set, animation, coordinates, legal-move dots, engine defaults and ChessMind chat options.
-- At phone width the board spans the screen and the visible panels become a tab row underneath.
+- At phone width the board spans the screen and the visible panels become a tab row underneath; inside Analysis, Moves and ChessMind are two tabs.
+- **Developer tools** (Settings, or the palette's "Developer: …" commands) add the Simulate panel. It is hidden otherwise.
 
 Adding a panel: write a component that reads app state with `useApp()` and register it in `src/panels/index.tsx` with `registerPanel({ id, title, icon, defaultZone, minSize, component })`. It then appears in the Layout menu, the command palette and the phone tabs; add its id to a preset in `src/workspace/layout.ts` to show it by default.
 
@@ -55,20 +57,21 @@ Everything is saved to `localStorage` (game, annotations, engine settings, layou
 
 ## ChessMind (in-browser language model)
 
-The **ChessMind** panel runs a [ChessMind](../ChessMind) model in the browser: onnxruntime-web 1.30.0 from cdnjs in a Web Worker (single-threaded wasm; WebGPU selectable), the model fetched in <= 14 MB chunks and cached with the Cache API.
+The ChessMind chat (in the Analysis panel, or on its own as the ChessMind panel) runs a [ChessMind](../ChessMind) model in the browser: onnxruntime-web 1.30.0 from cdnjs in a Web Worker (single-threaded wasm; WebGPU selectable), the model fetched in <= 14 MB chunks and cached with the Cache API.
 
-- **Predicted move**: the model's top 5 legal moves for the current position with probabilities, drawn as purple arrows. Click one to play it; **pin arrows** saves them on the position like your own arrows.
-- **Ask ChessMind**: questions in the model's dialogue format, streamed (60-token cap, Stop button); moves inside a line are sampled from legal moves only. Each move of an answer's line is clickable: it inserts the line as a variation (from the start position, or from the asked-at position with "lines from this position") and jumps there. **Play through**, **keep as main line** and **discard** work on that variation. The answer's text becomes purple ChessMind sticky notes (text before a line on its start node, text after it on its last node). The chat is saved with the game and cleared on New game.
-- **Board commands** typed in the same box are handled locally: `back 2`, `forward`, `go to move 12`, `start`, `end`, `flip`, `next variation`, `make this the main line`, `delete this line`, `add note: …`, `arrow e2 e4 red`, `highlight e4`, `clear arrows`, `new game`, SAN moves (`Nf3`), and `what should I play?` / `analyse` (top moves plus a short model comment).
-- **Advanced**: for board-embedding models, predictions can read only the last 8/16/32 plies (the board input carries the position).
+- **Predicted moves**: the model's top 5 legal moves for the current position as chips with probabilities (under the engine strip), drawn as purple arrows. Click one to play it; the pin saves the arrows on the position like your own arrows, the arrow toggle turns live arrows off.
+- **Chat**: an empty chat offers starters ("What's the plan here?", "Show me the Najdorf", …). Hidden reasoning shows as a collapsed "Thinking" block above the answer. Model, backend, reasoning, context and chat options are in the sliders popover of the chat header; loading shows as a slim progress bar.
+- **Ask ChessMind** (`/` focuses the box, Enter sends): questions in the model's dialogue format, streamed (60-token cap, Stop button); moves inside a line are sampled from legal moves only. An answer's lines render as move chips; each is clickable: it inserts the line as a variation (from the start position, or from the asked-at position with "lines start from this position") and jumps there. **Play through**, **Keep as main line** and **Discard** under the line work on that variation. The answer's text becomes purple ChessMind sticky notes (text before a line on its start node, text after it on its last node). The chat is saved with the game and cleared on New game.
+- **Board commands**: type `/` for a menu of them (↑/↓, Enter or Tab). They are handled locally, with or without the slash: `back 2`, `forward`, `go to move 12`, `start`, `end`, `flip`, `next variation`, `make this the main line`, `delete this line`, `add note: …`, `arrow e2 e4 red`, `highlight e4`, `clear arrows`, `new game`, SAN moves (`Nf3`), and `what should I play?` / `analyse` (top moves plus a short model comment).
+- **Move context** (settings popover): for board-embedding models, predictions can read only the last 8/16/32 plies (the board input carries the position).
 
-Models come from ChessMind's `scripts/export_onnx.py` (see its README). `npm run chessmind` (also run by `dev`, `build` and `host`) copies `../ChessMind/export/onnx/*` (or `$CHESSMIND_EXPORT`) into `public/chessmind/<name>/` (git-ignored) and writes `public/chessmind/models.json`; the first entry is the default. `node scripts/test-chessmind.mjs` checks the JS board encoding against the Python fixture.
+Models come from ChessMind's `scripts/export_onnx.py` (see its README). `npm run chessmind` (also run by `dev`, `build` and `host`) copies `../ChessMind/export/onnx/*` (or `$CHESSMIND_EXPORT`) into `public/chessmind/<name>/` (git-ignored) and writes `public/chessmind/models.json`; the first entry is the default. `node scripts/test-chessmind.mjs` checks the JS board encoding against the Python fixture; `node scripts/test-game.mjs` tests the game reducer's erase / undo.
 
 For a claude.ai artifact, `node scripts/build-artifact.mjs <dir>/index.html --no-full-engine` builds the page and copies the models to `<dir>/chessmind/`. `--no-full-engine` leaves out the 99 MB Stockfish Full chunks, because an artifact version is capped at 256 MB.
 
 ## Simulate (ChessMind vs Stockfish)
 
-The **Simulate** panel plays the selected ChessMind model against Stockfish on the board.
+A developer tool for measuring the model: turn on **Developer tools** in Settings (or run "Developer: Simulate vs Stockfish" from the palette) to add the **Simulate** panel, which plays the selected ChessMind model against Stockfish on the board. The panel shows a one-line summary of the setup; **Edit** opens the settings. The analysis engine pauses while a simulation runs.
 
 - **Settings**: ChessMind's colour (White, Black, or alternate each game); Stockfish **Skill Level** (0–20, default 3) with a per-move limit in ms (`go movetime`, default 100) or nodes (`go nodes`); the model's move (argmax, or sampled with temperature 0.3–1.0); start from the current position or the initial one; number of games (1–50); a delay after each move for watching (0–1000 ms); max plies (default 300).
 - **Opponent**: a separate Stockfish worker, so the Engine panel's analysis and settings are untouched. It uses the build selected in the Engine panel (multi-threaded builds only when the page is cross-origin isolated) and falls back to Stockfish 19 Lite single-threaded; Threads 1, Hash 16 MB, `ucinewgame` before each game.
@@ -87,11 +90,12 @@ The **Simulate** panel plays the selected ChessMind model against Stockfish on t
 - `src/components/StickyNotes.tsx`, `MoveList.tsx`, `PgnImport.tsx`, `EnginePanel.tsx`, `EvalBar.tsx`.
 - `src/design/` — design tokens (`tokens.css`: colour, type, space, radius, elevation, motion for light and dark), primitives (`base.css`) and area styles (`app.css`, `board.css`, `panels.css`). Fonts (Geist, Geist Mono, Newsreader) and icons (lucide) are bundled, so the app works offline.
 - `src/workspace/` — panel registry (`registry.ts`), the layout model and presets (`layout.ts`, pure functions), persistence (`useLayout.ts`), the docking workspace (`Workspace.tsx`, on react-resizable-panels) and the phone layout.
+- `src/analysis/` — the integrated Analysis panel and its engine strip.
 - `src/panels/` — built-in panel registrations and the Settings panel.
 - `src/app/` — app context for panels (`useApp`), command registry (palette, shortcuts), top bar, board stage, command palette, shortcuts sheet, onboarding.
 - `src/assets/pieces/` — piece sets (cburnett, chessnut; see the LICENSE there).
 - `src/engine/` — engine registry, UCI client over a Web Worker, React hook.
-- `src/chessmind/` — ChessMind: tokenizer and board-code ports, inference worker, React hook, panel, chat commands.
+- `src/chessmind/` — ChessMind: tokenizer and board-code ports, inference worker, React hook, chat (`ChessMindPanel.tsx`), settings popover, prediction chips, chat commands.
 - `src/simulate/` — Simulate: the game loop (`useSimulate.ts`), panel, and the Skill Level Elo table.
 
 ## Planned

@@ -21,6 +21,8 @@ export interface ZoneState {
 
 export interface Layout {
   version: 1;
+  /** Preset revision the layout was made with. A saved, unedited preset from an older revision is rebuilt. */
+  rev?: number;
   zones: Record<Zone, ZoneState>;
   /** Preset the layout started from; 'custom' once edited. */
   preset: PresetId | 'custom';
@@ -39,37 +41,39 @@ type PresetSpec = { name: string; description: string; zones: Partial<Record<Zon
 export const PRESETS: Record<PresetId, PresetSpec> = {
   study: {
     name: 'Study',
-    description: 'Notes beside the board, moves and analysis on the right',
+    description: 'Notes on the left, moves, engine and ChessMind in one panel on the right',
     zones: {
       left: { size: 21, stacks: [{ panels: ['notes'] }] },
-      right: { size: 27, stacks: [{ panels: ['moves'], size: 50 }, { panels: ['engine', 'chessmind', 'simulate'], size: 50 }] },
+      right: { size: 29, stacks: [{ panels: ['analysis'] }] },
     },
   },
   analysis: {
     name: 'Analysis',
-    description: 'Engine lines on top, the move tree and notes below',
+    description: 'A wide analysis panel; notes tabbed beside it',
     zones: {
-      right: { size: 30, stacks: [{ panels: ['engine'], size: 42 }, { panels: ['moves', 'notes'], size: 58 }] },
+      right: { size: 34, stacks: [{ panels: ['analysis', 'notes'] }] },
     },
   },
   play: {
-    name: 'Play vs model',
-    description: 'Simulate ChessMind against Stockfish and follow the game',
+    name: 'Focus',
+    description: 'The board with a slim analysis column',
     zones: {
-      right: { size: 30, stacks: [{ panels: ['simulate'], size: 58 }, { panels: ['moves', 'engine'], size: 42 }] },
+      right: { size: 25, stacks: [{ panels: ['analysis'] }] },
     },
   },
   coach: {
     name: 'Coach',
-    description: 'Talk the position through with ChessMind, notes at hand',
+    description: 'Room to talk the position through with ChessMind, notes at hand',
     zones: {
-      left: { size: 22, stacks: [{ panels: ['moves'], size: 55 }, { panels: ['notes'], size: 45 }] },
-      right: { size: 30, stacks: [{ panels: ['chessmind'] }] },
+      left: { size: 20, stacks: [{ panels: ['notes'] }] },
+      right: { size: 36, stacks: [{ panels: ['analysis'] }] },
     },
   },
 };
 
 export const DEFAULT_PRESET: PresetId = 'study';
+/** Bump when PRESETS change so unedited saved presets pick up the new arrangement (2: one integrated Analysis panel). */
+export const PRESET_REV = 2;
 
 export function presetLayout(id: PresetId): Layout {
   const spec = PRESETS[id];
@@ -78,7 +82,7 @@ export function presetLayout(id: PresetId): Layout {
     const zs = spec.zones[z];
     zones[z] = { size: zs?.size ?? (z === 'bottom' ? 30 : 24), stacks: (zs?.stacks ?? []).map((s) => stack(s.panels, s.size)) };
   }
-  return sanitize({ version: 1, zones, preset: id });
+  return sanitize({ version: 1, rev: PRESET_REV, zones, preset: id });
 }
 
 /** Drop unknown/duplicate panels and empty stacks, repair active tabs and sizes. Safe on untrusted input. */
@@ -108,7 +112,9 @@ export function sanitize(input: unknown): Layout {
     zones[z] = { stacks, size };
   }
   const preset = raw.preset && (raw.preset === 'custom' || raw.preset in PRESETS) ? raw.preset : 'custom';
-  return { version: 1, zones, preset };
+  // An unedited preset saved before the presets changed: rebuild it from the current definition.
+  if (preset !== 'custom' && raw.rev !== PRESET_REV) return presetLayout(preset);
+  return { version: 1, rev: PRESET_REV, zones, preset };
 }
 
 export function locate(layout: Layout, panelId: string): { zone: Zone; stack: Stack; stackIndex: number; tabIndex: number } | null {
@@ -127,6 +133,7 @@ export const hiddenPanels = (layout: Layout) => allPanels().filter((p) => !isVis
 
 const clone = (l: Layout): Layout => ({
   version: 1,
+  rev: PRESET_REV,
   preset: 'custom',
   zones: Object.fromEntries(ZONES.map((z) => [z, { size: l.zones[z].size, stacks: l.zones[z].stacks.map((s) => ({ ...s, panels: [...s.panels] })) }])) as Record<Zone, ZoneState>,
 });

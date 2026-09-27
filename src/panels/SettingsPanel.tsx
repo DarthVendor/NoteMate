@@ -1,4 +1,4 @@
-import { Monitor, Moon, RotateCcw, Sun } from 'lucide-react';
+import { Monitor, Moon, RotateCcw, Sun, Swords } from 'lucide-react';
 import { useApp } from '../app/AppContext';
 import { BOARD_THEMES, PIECE_SETS, type MotionPref, type ThemePref } from '../ui/settings';
 import { Segmented } from '../ui/primitives';
@@ -18,7 +18,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export function SettingsPanel() {
-  const { ui, updateUi, engine, chessmind, layout, toast } = useApp();
+  const { ui, updateUi, engine, chessmind, layout, toast, revealPanel } = useApp();
   const cm = chessmind.settings;
   return (
     <div className="settings-panel" data-testid="settings-panel">
@@ -133,6 +133,23 @@ export function SettingsPanel() {
           </span>
           <input type="checkbox" checked={cm.aboutPosition} onChange={(e) => chessmind.update({ aboutPosition: e.target.checked })} />
         </label>
+      </Section>
+
+      <Section title="Developer">
+        <label className="check-row">
+          <span className="check-text">
+            <span>Developer tools</span>
+            <span className="field-hint">Adds the Simulate panel: ChessMind plays Stockfish for a rough Elo estimate</span>
+          </span>
+          <input type="checkbox" checked={ui.devTools} onChange={(e) => updateUi({ devTools: e.target.checked })} data-testid="dev-tools" />
+        </label>
+        {ui.devTools && (
+          <div className="settings-actions">
+            <button className="btn btn-sm" onClick={() => revealPanel('simulate')} data-testid="open-simulate">
+              <Swords size={13} /> Open Simulate
+            </button>
+          </div>
+        )}
       </Section>
 
       <Section title="Workspace">

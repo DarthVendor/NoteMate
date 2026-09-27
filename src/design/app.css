@@ -269,6 +269,15 @@
 
 /* ---------- Toast ---------- */
 .toast-region { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: var(--z-toast); pointer-events: none; }
+.toast.has-action { display: flex; align-items: center; gap: 14px; padding-right: 6px; pointer-events: auto; }
+.toast-action {
+  height: 26px; padding: 0 10px;
+  border: none; border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--text-inverse) 16%, transparent);
+  color: var(--text-inverse);
+  font-size: var(--fs-sm); font-weight: var(--fw-semibold);
+}
+.toast-action:hover { background: color-mix(in srgb, var(--text-inverse) 26%, transparent); }
 .toast {
   padding: 9px 14px;
   border-radius: var(--r-md);
