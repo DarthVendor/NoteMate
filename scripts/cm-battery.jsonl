@@ -1,0 +1,43 @@
+// Default ChessMind experiment battery for scripts/cm-chat.mjs --batch. One JSON object per line (// and # lines are
+// comments). Fields: id, tags, prompt | turns (multi-turn follow-ups, history carried), fen, moves (SAN/UCI from the
+// start), aboutPosition, think, tools (on|force|names), notes ({ply: text}), contextText, expect (what a good answer does).
+{"id":"greet-hi","tags":["chitchat"],"prompt":"hi","expect":"a short greeting, no lines, no evals"}
+{"id":"greet-howareyou","tags":["chitchat"],"prompt":"How are you today?","expect":"friendly chitchat"}
+{"id":"greet-who","tags":["chitchat"],"prompt":"Who are you and what can you do?","expect":"describes itself as a chess assistant"}
+{"id":"greet-thanks","tags":["chitchat"],"prompt":"Thanks, that was helpful!","expect":"polite reply, no chess dump"}
+{"id":"open-najdorf","tags":["opening"],"prompt":"Show me the Najdorf","expect":"1.e4 c5 2.Nf3 d6 3.d4 cxd4 4.Nxd4 Nf6 5.Nc3 a6"}
+{"id":"open-qpo","tags":["opening"],"prompt":"What is the Queen's Pawn Opening?","expect":"1.d4"}
+{"id":"open-play-sicilian","tags":["opening"],"prompt":"Play the Sicilian","expect":"1.e4 c5"}
+{"id":"open-closed-sicilian","tags":["opening"],"prompt":"Show me the Closed Sicilian","expect":"1.e4 c5 2.Nc3 (no early d4)"}
+{"id":"open-open-sicilian","tags":["opening"],"prompt":"Show me the Open Sicilian","expect":"1.e4 c5 2.Nf3 ... 3.d4 cxd4 4.Nxd4"}
+{"id":"open-kid","tags":["opening"],"prompt":"What is the King's Indian Defense?","expect":"1.d4 Nf6 2.c4 g6 3.Nc3 Bg7 4.e4 d6"}
+{"id":"open-ruy","tags":["opening"],"prompt":"Show me the main line of the Ruy Lopez","expect":"1.e4 e5 2.Nf3 Nc6 3.Bb5 a6 ..."}
+{"id":"open-catalan","tags":["opening"],"prompt":"What's the difference between the Open and the Closed Catalan?","expect":"Open: ...dxc4; Closed: ...Be7 keeps the centre"}
+{"id":"line-name-najdorf","tags":["opening","game-line"],"moves":"e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 a6","prompt":"What opening is this?","expect":"Sicilian Najdorf"}
+{"id":"line-ruy-plan","tags":["opening","game-line"],"moves":"e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7","prompt":"What is the usual plan for White here?","expect":"Re1, c3, d4 (Closed Ruy Lopez)"}
+{"id":"line-caro-advance","tags":["opening","game-line"],"moves":"e4 c6 d4 d5 e5","prompt":"What did White just play, and what are Black's main replies?","expect":"Advance Variation; 3...Bf5 (or 3...c5)"}
+{"id":"mid-what-play-qgd","tags":["middlegame"],"moves":"d4 d5 c4 e6 Nc3 Nf6 Bg5 Be7 e3 O-O Nf3 Nbd7 Rc1 c6 Bd3 dxc4 Bxc4 Nd5","prompt":"What should I play?","expect":"a sensible White move (e.g. Bxe7), no invented evals"}
+{"id":"mid-what-play-fen","tags":["middlegame"],"fen":"r2q1rk1/pp2bppp/2n1pn2/3p4/3P4/2NBPN2/PP3PPP/R2Q1RK1 w - - 0 10","prompt":"What should I play here?","expect":"a plan move (e.g. a3, Qe2, Rc1), no invented evals"}
+{"id":"mid-plan-iqp","tags":["middlegame"],"fen":"r1bq1rk1/pp2bppp/2n1pn2/8/3P4/2NB1N2/PP3PPP/R1BQ1RK1 w - - 0 9","prompt":"What is the plan for White with the isolated pawn?","expect":"piece activity, kingside attack, d5 break"}
+{"id":"end-lucena","tags":["endgame"],"fen":"1K6/1P1k4/8/8/8/8/r7/2R5 w - - 0 1","prompt":"How does White win this rook endgame?","expect":"Lucena: Rd1+ / Rc4 bridge"}
+{"id":"end-kpk","tags":["endgame"],"fen":"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1","prompt":"Is this a win or a draw?","expect":"draw with best play (Black has the opposition); a line"}
+{"id":"end-kpk-win","tags":["endgame"],"fen":"8/8/8/8/4k3/8/3KP3/8 w - - 0 1","prompt":"How should White play this pawn ending?","expect":"king in front of the pawn / opposition"}
+{"id":"tac-mate1-backrank","tags":["tactics"],"fen":"6k1/5ppp/8/8/8/8/5PPP/3R2K1 w - - 0 1","prompt":"White to play and mate in one. Hint: look at the back rank.","expect":"Rd8#"}
+{"id":"tac-mate1-smother","tags":["tactics"],"fen":"6rk/6pp/8/6N1/8/8/8/1Q4K1 w - - 0 1","prompt":"Find the mate in one.","expect":"Nf7#"}
+{"id":"tac-mate1-scholar","tags":["tactics"],"moves":"e4 e5 Bc4 Nc6 Qh5 Nf6","prompt":"Can White win right away?","expect":"Qxf7#"}
+{"id":"tac-fork","tags":["tactics"],"fen":"r3k2r/ppp2ppp/2n5/3q4/8/2N5/PPP2PPP/R1BQKB1R w KQkq - 0 9","prompt":"Is there a tactic for White? Hint: look at the black queen.","expect":"Nxd5 wins the queen"}
+{"id":"fu-sicilian-dragon","tags":["multi-turn","opening"],"turns":["Show me the Sicilian","No, I meant the Dragon"],"expect":"turn 2: ...g6 / Bg7 Dragon line"}
+{"id":"fu-italian-evans","tags":["multi-turn","opening"],"turns":["Play the Italian Game","What about the Evans Gambit instead?"],"expect":"turn 2: 4.b4"}
+{"id":"fu-caro-advance","tags":["multi-turn","opening"],"turns":["What is the Caro-Kann?","And the Advance Variation?"],"expect":"turn 2: 3.e5"}
+{"id":"fu-correction","tags":["multi-turn"],"moves":"e4 e5 Nf3 Nc6","turns":["What should White play?","That's not right, I want an aggressive move. Try again."],"expect":"(game line + an answer snapshot: turn 2 hits the snapshot/line bug) turn 2: a different, aggressive move (Bc4 / d4 Scotch)"}
+{"id":"fu-correction-fen","tags":["multi-turn"],"fen":"r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3","turns":["What should White play?","That's not right, I want an aggressive move. Try again."],"expect":"turn 2: a different, aggressive move (Bc4 / d4 Scotch)"}
+{"id":"fact-doubled","tags":["board-facts"],"fen":"r1bqkb1r/p4ppp/2p2n2/2p1p3/4P3/2N5/PPP2PPP/R1BQKB1R w KQkq - 0 8","prompt":"Are there doubled pawns?","expect":"yes: Black's c-pawns (c6, c5); no false claim flags"}
+{"id":"fact-material","tags":["board-facts"],"fen":"r1bqk2r/pppp1ppp/2n2n2/8/1bB1P3/2N5/PPP2PPP/R1BQK2R w KQkq - 0 7","prompt":"Who is ahead in material?","expect":"Black is up a knight; no false claim flags"}
+{"id":"fact-king-safety","tags":["board-facts"],"fen":"r4rk1/pp3p1p/2p3p1/8/8/2P5/PP3PPP/R4RK1 w - - 0 20","prompt":"Whose king is safer?","expect":"White (intact f2-g2-h2) vs Black's weakened dark squares"}
+{"id":"honest-eval-noengine","tags":["honesty"],"moves":"e4 e5 Nf3 Nc6 Bb5 a6","prompt":"What is the exact engine evaluation of this position?","expect":"no made-up numbers (eval flags = 0) or says it has no engine"}
+{"id":"honest-centipawns","tags":["honesty"],"fen":"r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3","prompt":"How many centipawns is White ahead?","expect":"no invented eval"}
+{"id":"tool-engine","tags":["tools"],"tools":"on","moves":"e4 e5 Nf3 Nc6 Bc4 Nf6","prompt":"What does the engine say about this position?","expect":"calls engine; cites its eval"}
+{"id":"tool-engine-move","tags":["tools"],"tools":"on","moves":"d4 d5 c4 e6 Nc3 Nf6","prompt":"Check with the engine whether Bg5 is good here.","expect":"engine call with the line Bg5"}
+{"id":"tool-engine-forced","tags":["tools"],"tools":"force","fen":"r2q1rk1/pp2bppp/2n1pn2/3p4/3P4/2NBPN2/PP3PPP/R2Q1RK1 w - - 0 10","prompt":"What is the best move?","expect":"forced engine call, answer consistent with it"}
+{"id":"tool-notes","tags":["tools","notes"],"tools":"on","moves":"e4 e5 Nf3 Nc6 Bb5","notes":{"5":"I played Bb5 because I always go for the Ruy Lopez","4":"Black's most common reply"},"prompt":"What did I write in my notes about 3.Bb5?","expect":"notes call; quotes the note"}
+{"id":"tool-all-notes","tags":["tools","notes"],"tools":"on","moves":"d4 Nf6 c4 g6","notes":{"1":"Start with d4 against this opponent","4":"He always plays the King's Indian"},"prompt":"Summarise my notes on this game.","expect":"all_notes call; both notes"}

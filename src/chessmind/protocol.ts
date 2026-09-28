@@ -73,7 +73,7 @@ export type ToWorker =
   /** threads: wasm threads (0 / unset = auto: several when the page is cross-origin isolated, else 1). */
   | { type: 'load'; base: string; backend: Backend; threads?: number; debug?: boolean }
   /** contextPlies (board models only): feed <|game|> + the last N moves, the game token carrying the board at the crop. null = full game. */
-  | { type: 'predict'; id: number; moves: string[]; top: number; contextPlies: number | null }
+  | { type: 'predict'; id: number; moves: string[]; top: number; contextPlies: number | null; /** Board models: the moves start from this position (a board-only cropped prompt; dev tooling). */ startFen?: string }
   | {
       type: 'chat';
       id: number;
@@ -108,6 +108,13 @@ export type ToWorker =
        * which take a line, the most calls per answer, a tool whose first call is forced (a demo for models not trained
        * with tools) and how long to wait for each result. The worker asks the app with `tool-call` messages. */
       tools?: { names: string[]; takesLine?: Record<string, boolean>; maxCalls?: number; force?: string | null; timeoutMs?: number };
+      /** Seeds the sampling RNG for this request (reproducible answers); unset = Math.random. */
+      seed?: number;
+      /** Drop the KV caches first: a reused cached prefix changes the logits slightly, enough to flip a sampled token,
+       * so reproducible (seeded) runs start from an empty cache. */
+      freshCache?: boolean;
+      /** Dev tooling: send a `chat-trace` (why lines and the answer stopped, budgets) after the last update. */
+      trace?: boolean;
     }
   /** The app's answer to a `tool-call`: the result text (an error result when `ok` is false). */
   | { type: 'tool-result'; id: number; call: number; text: string; ok: boolean; compact?: string[] }
@@ -132,7 +139,24 @@ export type ToWorker =
       /** Think lines (default DEFAULT_LINE_TEMPERATURE = 0: greedy). */
       lineTemperature?: number;
       lineRules?: { endP?: Partial<LineRules['endP']>; maxPlies?: Partial<LineRules['maxPlies']>; stopFinished?: boolean };
+      /** Seeds the sampling RNG for this pick; unset = Math.random. */
+      seed?: number;
     };
+
+/** Why a generated line ended: its <|end_line|> was the only choice (length cap or finished position), P(end) reached
+ * the threshold, or the model chose it outright. */
+export type LineEndReason = 'rule' | 'threshold' | 'model';
+
+/** Dev tooling (chat `trace`): how the generation went. */
+export interface ChatTrace {
+  /** Per generated <|end_line|>, in order (think lines first): why, P(<|end_line|>) among the allowed ids, where. */
+  lineEnds: { reason: LineEndReason; p: number; inThink: boolean }[];
+  /** What ended the answer: <|eos|>, a new <|user|> turn, the token budget, or a stop request. */
+  stop: 'eos' | 'user' | 'budget' | 'stopped';
+  promptTokens: number;
+  maxTokens: number;
+  maxThinkTokens: number;
+}
 
 export type FromWorker =
   | { type: 'progress'; loaded: number; total: number; phase: 'download' | 'compile' }
@@ -147,5 +171,6 @@ export type FromWorker =
    * `moves` played from `baseFen`, or the current position) and answer with `tool-result`. `numbers`: move numbers of
    * `fen` are real. */
   | { type: 'tool-call'; id: number; call: number; name: string; fen: string; moves: string[]; baseFen?: string; numbers: boolean }
+  | { type: 'chat-trace'; id: number; trace: ChatTrace }
   /** Debug mode only: one forward pass (see worker debugCheck). */
   | { type: 'debug'; data: Record<string, unknown> };

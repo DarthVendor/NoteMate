@@ -16,7 +16,7 @@ import { DEFAULT_LINE_RULES, probAmong, type LineRules } from './lineRules';
 import { dialoguePosition, rewindCandidates } from './snapshots';
 import { LineConstraint, MAX_TOOL_CALLS, ToolConstraint, type GenConstraint, type ToolRequestInfo } from './constraint';
 import { DEFAULT_TOOL_TIMEOUT_MS, RESULT_BUDGET, TOOL_SPECS, addToolsBlock, errorText, fitToolResult, type ToolResultData } from './tools';
-import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, DEFAULT_THINK_MOVE_TEMPERATURE, DEFAULT_THINK_MOVE_TOKENS, DEFAULT_THINK_MOVE_TOP_K, ORT_DIR, ORT_SCRIPT_FILE, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type PickThink, type ToWorker } from './protocol';
+import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, DEFAULT_THINK_MOVE_TEMPERATURE, DEFAULT_THINK_MOVE_TOKENS, DEFAULT_THINK_MOVE_TOP_K, ORT_DIR, ORT_SCRIPT_FILE, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type PickThink, type ToWorker, type ChatTrace } from './protocol';
 import { ThinkMoveConstraint } from './thinkMove';
 
 // Minimal typing of the onnxruntime-web globals used here.
@@ -50,6 +50,19 @@ let debugTag = '';
 /** Debug: the moves of the prediction being logged (Python rebuilds a cropped game's start position from them). */
 let debugMoves: string[] | null = null;
 let pendingPredict: Extract<ToWorker, { type: 'predict' }> | null = null;
+/** Sampling RNG: Math.random, or a seeded mulberry32 for a request that carries a `seed` (reproducible dev runs). */
+let rand: () => number = Math.random;
+function seeded(seed: number | undefined): () => number {
+  if (seed === undefined) return Math.random;
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 let predictRunning = false;
 
 // session.run must not overlap (and the caches must not change under a run): chain every call.
@@ -372,19 +385,21 @@ function trimPrefix(ids: number[], rows: BoardRow[] | undefined, reserve: number
  * per-side instances (manifest `perspective_games`) get `<|bos|> <|game|> <side to move>` in front, like
  * ChessMind's generate.game_prompt.
  */
-function gamePrefix(moves: string[], k: number | null): { ids: number[]; rows?: BoardRow[] } {
-  const perspective = manifest!.perspective_games ? ChessTokenizer.sideToMove(moves.length) : undefined;
-  if (manifest!.boards) return encodeGameWithBoards(tok!, moves, k, perspective, boardOpts());
+function gamePrefix(moves: string[], k: number | null, startFen?: string): { ids: number[]; rows?: BoardRow[] } {
+  const blackFirst = startFen?.trim().split(/\s+/)[1] === 'b';
+  const perspective = manifest!.perspective_games ? ChessTokenizer.sideToMove(moves.length + (blackFirst ? 1 : 0)) : undefined;
+  if (manifest!.boards) return encodeGameWithBoards(tok!, moves, k, perspective, boardOpts(), startFen);
+  if (startFen) throw new Error('predictions from a FEN need a board-embedding model');
   return { ids: tok!.encodeGame(moves, undefined, perspective) };
 }
 
 /** Legal-move distribution for the position after `moves` (softmax over legal moves only). */
-async function topMoves(moves: string[], top: number, k: number | null): Promise<{ moves: MovePrediction[]; ms: number; tokens: number }> {
-  const chess = new Chess();
+async function topMoves(moves: string[], top: number, k: number | null, startFen?: string): Promise<{ moves: MovePrediction[]; ms: number; tokens: number }> {
+  const chess = new Chess(startFen);
   for (const m of moves) chess.move({ from: m.slice(0, 2), to: m.slice(2, 4), promotion: m[4] });
   const legal = legalUci(chess);
   if (legal.length === 0) return { moves: [], ms: 0, tokens: 0 };
-  const game = gamePrefix(moves, k);
+  const game = gamePrefix(moves, k, startFen);
   const { ids, rows } = trimPrefix(game.ids, game.rows, 1);
   debugTag = `predict ${moves.length} k=${k}`;
   debugMoves = moves;
@@ -402,7 +417,7 @@ async function topMoves(moves: string[], top: number, k: number | null): Promise
 }
 
 async function predict(req: Extract<ToWorker, { type: 'predict' }>) {
-  const r = await topMoves(req.moves, req.top, req.contextPlies);
+  const r = await topMoves(req.moves, req.top, req.contextPlies, req.startFen);
   post({ type: 'prediction', id: req.id, ...r });
 }
 
@@ -427,6 +442,7 @@ async function drainPredict() {
 /** One move for the simulator: argmax or a sample from p^(1/T) over the legal moves (after a think, see thinkPick). */
 async function pick(req: Extract<ToWorker, { type: 'pick' }>) {
   const t = tok!;
+  rand = seeded(req.seed);
   if (req.think && req.think !== 'off' && t.hasText && t.supportsThinking) {
     if (await thinkPick(req)) return;
     if (stopped.has(req.id)) {
@@ -442,7 +458,7 @@ async function pick(req: Extract<ToWorker, { type: 'pick' }>) {
   let chosen = r.moves[0];
   if (req.temperature > 0) {
     const w = r.moves.map((m) => Math.pow(m.p, 1 / req.temperature));
-    let x = Math.random() * w.reduce((a, b) => a + b, 0);
+    let x = rand() * w.reduce((a, b) => a + b, 0);
     for (let i = 0; i < w.length; i++) {
       x -= w[i];
       if (x <= 0) {
@@ -551,7 +567,7 @@ function sample(logits: Float32Array, allowed: number[], temperature: number, to
   if (topK > 0 && cand.length > topK) cand = cand.sort((a, b) => b.l - a.l).slice(0, topK);
   const max = Math.max(...cand.map((c) => c.l));
   const w = cand.map((c) => Math.exp(c.l - max));
-  let r = Math.random() * w.reduce((a, b) => a + b, 0);
+  let r = rand() * w.reduce((a, b) => a + b, 0);
   for (let k = 0; k < cand.length; k++) {
     r -= w[k];
     if (r <= 0) return cand[k].i;
@@ -680,6 +696,8 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
   const positions = rewindCandidates(turns, req.gameMoves);
   debugTag = `chat ${req.id}`;
   debugMoves = null;
+  rand = seeded(req.seed);
+  if (req.freshCache) pool = [];
   const mode = req.think ?? 'auto';
   const thinking = t.supportsThinking && mode !== 'off';
   // The think fits the context: what the prompt and the answer leave (a quarter of it at least), as chat() in generate.py
@@ -715,12 +733,28 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
   // v6 rows take the snapshots' clocks / castling / en passant from their FENs (not a text note)
   const tracker = manifest!.boards ? new BoardTracker(t, undefined, { ...boardOpts(), snapshotFens: dialogueSnapshotFens(turns) }) : null;
   const endThink = t.endThinkId;
-  await generate({
+  // Dev trace: why each line ended (only choice = a rule; P(end) at the threshold; else the model's own pick)
+  const lineEnds: ChatTrace['lineEnds'] = [];
+  let inThink = false;
+  const observe = req.trace
+    ? (logits: Float32Array, allowed: number[], next: number) => {
+        if (next === t.thinkId) inThink = true;
+        else if (next === endThink) inThink = false;
+        else if (next === t.endLineId) {
+          const p = probAmong(logits, allowed, t.endLineId);
+          const tau = constraint.endThreshold();
+          lineEnds.push({ reason: allowed.length === 1 ? 'rule' : tau !== null && p >= tau ? 'threshold' : 'model', p, inThink });
+        }
+      }
+    : undefined;
+  const maxTokens = req.maxTokens + (thinking ? maxThink + 2 : 0) + toolBudget;
+  const out = await generate({
+    observe,
     id: req.id,
     prefix,
     prefixRows: tracker?.rows(prefix),
     nextRow: tracker ? (id) => tracker.feed(id) : undefined,
-    maxTokens: req.maxTokens + (thinking ? maxThink + 2 : 0) + toolBudget,
+    maxTokens,
     inject,
     temperature: req.temperature,
     topK: req.topK,
@@ -744,6 +778,11 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
       return parts;
     },
   });
+  if (req.trace) {
+    const last = out[out.length - 1];
+    const stop = last === t.eosId ? 'eos' : last === t.userId ? 'user' : stopped.has(req.id) ? 'stopped' : 'budget';
+    post({ type: 'chat-trace', id: req.id, trace: { lineEnds, stop, promptTokens: prefix.length, maxTokens, maxThinkTokens: thinking ? maxThink : 0 } });
+  }
 }
 
 /** Pending `tool-call`s by `${request id}:${call index}`. */

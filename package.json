@@ -36,6 +36,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "onnxruntime-web": "1.30.0",
     "oxlint": "^1.81.0",
+    "playwright-core": "^1.63.0",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"
   }

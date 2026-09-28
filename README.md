@@ -87,6 +87,26 @@ The ChessMind chat (in the Analysis panel, or on its own as the ChessMind panel)
 
 Models come from ChessMind's `scripts/export_onnx.py` (see its README). `npm run chessmind` (also run by `dev`, `build` and `host`) copies `../ChessMind/export/onnx/*` (or `$CHESSMIND_EXPORT`) into `public/chessmind/<name>/` (git-ignored) and writes `public/chessmind/models.json`; the first entry is the default. `node scripts/test-chessmind.mjs` checks the JS board encoding against the Python fixture; `node scripts/test-game.mjs` tests the game reducer's erase / undo.
 
+### Scripting the model (cm-chat)
+
+`scripts/cm-chat.mjs` asks a model questions through the product path (the same worker, int8 ONNX model, line rules, tools and claim checker as the chat) in one headless Chromium page, so experiments need no PyTorch and stay light on a laptop. It drives a dev-only hook, `window.__chessmind` (`src/chessmind/devHook.ts`: `loadModel(id)`, `ask({...})`, `predict({fen|moves})`), which the app installs only with `?dev=1` or localStorage `notemate.dev = '1'`. The host (`npm run host`) is started in the background if it is not running; the served build must include the hook (`--build` rebuilds). Output is JSON (`--pretty` for people). A `seed` makes sampling reproducible.
+
+```sh
+node scripts/cm-chat.mjs --pretty "Show me the Najdorf"                      # default model v5-250m-s95k
+node scripts/cm-chat.mjs --model v5-250m-s30k --moves "e4 c5 Nf3 d6" --think off --seed 3 "What should White play?"
+node scripts/cm-chat.mjs --fen "8/8/8/4k3/8/8/4P3/4K3 w - - 0 1" --pretty "Is this a win?"
+node scripts/cm-chat.mjs --tools on --moves "e4 e5 Nf3 Nc6 Bb5" --notes '{"5":"my Ruy Lopez"}' "What did I note on 3.Bb5?"
+node scripts/cm-chat.mjs --history h.json --save-history h.json "No, the other one"   # multi-turn from a file
+node scripts/cm-chat.mjs --repl                                               # interactive; /help for commands
+node scripts/cm-chat.mjs --predict --pretty --moves "e4 e5 Nf3"                # move chips (also --fen, board models)
+node scripts/cm-chat.mjs --batch scripts/cm-battery.jsonl --models v5-250m-s95k,v5-250m-s30k --seeds 2 --out /tmp/run.jsonl
+node scripts/cm-chat.mjs --summarize /tmp/run.jsonl,/tmp/pc-fp32.jsonl --summary /tmp/compare.md
+node scripts/cm-chat.mjs --daemon --model v5-250m-s95k &                      # keep the browser + model loaded
+node scripts/cm-chat.mjs --stop-daemon
+```
+
+An answer has `think` (text, tokens, cut off), `answer` (lines as `[[1.e4 c5 2.Nf3]]` SAN), `lines` (where, SAN, plies, why the line ended: `rule` = length cap or finished position, `threshold` = P(end) reached the end-line threshold, `model`, or `open`), `tools` (calls and results), `flags` (the claim checker's false board facts and made-up evaluations), `tokens`, `ms`, `msPerToken`, `stop` and `history` (pass it back for the next turn). The batch writes one JSONL record per prompt × model × seed and a markdown summary next to it (answers side by side, think length, lines, flags, per-model aggregates, memory). `scripts/cm-battery.jsonl` is the default battery (chitchat, opening names, game-line questions, middlegames, endgames, tactics, multi-turn corrections, board facts, eval honesty, tools and notes); `--only REGEX` filters by id / tag. When a daemon runs, every call reuses its browser (one page, one model at a time). For fp32 PyTorch answers in the same schema, ChessMind's `scripts/chat_batch.py` runs a battery on the PC through the heavy queue.
+
 For a claude.ai artifact, `node scripts/build-artifact.mjs <dir>/index.html --no-full-engine` builds the page and copies the models to `<dir>/chessmind/`. `--no-full-engine` leaves out the 99 MB Stockfish Full chunks, because an artifact version is capped at 256 MB.
 
 ## Simulate (ChessMind vs Stockfish)

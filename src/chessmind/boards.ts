@@ -558,15 +558,17 @@ export function encodeGameWithBoards(
   k: number | null,
   perspective?: Perspective,
   opts?: { sync?: BoardSync; features?: readonly string[] },
+  /** The moves start from this position instead of the initial one (the game token carries it, as a crop's). */
+  initialFen?: string,
 ): { ids: number[]; rows: BoardRow[] } {
   const start = k === null ? 0 : Math.max(0, moves.length - k);
-  const board = new TrackedBoard();
+  const board = new TrackedBoard(initialFen);
   for (let i = 0; i < start; i++) if (!board.push(moves[i])) throw new Error(`illegal move ${moves[i]}`);
   if (opts?.features?.length || (opts?.sync ?? 'legacy') !== 'legacy') {
     // v6 rows: exactly the training tracker's (a cropped instance starts from the crop FEN, without history)
     const ids = perspective ? [tok.bosId, tok.gameId, tok.perspectiveId(perspective)] : [tok.gameId];
     for (let i = start; i < moves.length; i++) ids.push(tok.moveToId(moves[i]));
-    let startFen: string | undefined;
+    let startFen: string | undefined = initialFen;
     if (start > 0) {
       const f = board.chess.fen().split(' ');
       f[3] = board.ep === null ? '-' : `${FILES[board.ep]}${board.chess.turn() === 'w' ? 6 : 3}`;
