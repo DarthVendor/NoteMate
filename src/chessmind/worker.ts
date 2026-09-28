@@ -10,14 +10,15 @@
  */
 import { Chess } from 'chess.js';
 import { ChessTokenizer, type DialoguePart, type DialogueTurn } from './tokenizer';
-import { BoardTracker, dialogueSnapshotFens, encodeGameWithBoards, nSlots, type BoardRow, type BoardSync } from './boards';
+import { BoardTracker, cropStartFen, dialogueSnapshotFens, encodeGameWithBoards, nSlots, type BoardRow, type BoardSync } from './boards';
 import { KV_SINKS, moveKeys, rowsHash, sharedPrefix } from './kv';
 import { DEFAULT_LINE_RULES, probAmong, type LineRules } from './lineRules';
 import { anchorUserLines, dialoguePosition, rewindCandidates } from './snapshots';
 import { LineConstraint, MAX_TOOL_CALLS, ToolConstraint, type GenConstraint, type ToolRequestInfo } from './constraint';
 import { DEFAULT_TOOL_TIMEOUT_MS, RESULT_BUDGET, TOOL_SPECS, addToolsBlock, errorText, fitToolResult, type ToolResultData } from './tools';
-import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, DEFAULT_THINK_MOVE_TEMPERATURE, DEFAULT_THINK_MOVE_TOKENS, DEFAULT_THINK_MOVE_TOP_K, ORT_DIR, ORT_SCRIPT_FILE, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type PickThink, type ToWorker, type ChatTrace } from './protocol';
+import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_PRIOR_THINKS, DEFAULT_MAX_THINK_TOKENS, DEFAULT_THINK_MOVE_TEMPERATURE, DEFAULT_THINK_MOVE_TOKENS, DEFAULT_THINK_MOVE_TOP_K, ORT_DIR, ORT_SCRIPT_FILE, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type PickThink, type ToWorker, type ChatTrace } from './protocol';
 import { ThinkMoveConstraint, anchorIds } from './thinkMove';
+import { fitHistory, thinkPrefixIds } from './thinkThread';
 
 // Minimal typing of the onnxruntime-web globals used here.
 interface OrtTensor { data: Float32Array | BigInt64Array; dims: readonly number[]; dispose?: () => void }
@@ -393,6 +394,15 @@ function gamePrefix(moves: string[], k: number | null, startFen?: string): { ids
   return { ids: tok!.encodeGame(moves, undefined, perspective) };
 }
 
+/** The game prefix with the model's earlier thinks (thinkThread.thinkPrefixIds) and its rows: the v6 tracker over
+ * the whole prefix, returned fed so the generated tokens continue it. */
+function thinkPrefix(moves: string[], thinks: Record<number, number[]>, k: number | null, reserve: number, maxPrior: number): { ids: number[]; rows?: BoardRow[]; tracker: BoardTracker | null } {
+  const p = thinkPrefixIds(tok!, moves, thinks, { k, reserve, limit: manifest!.max_seq_len, perspectiveGames: !!manifest!.perspective_games, maxPrior });
+  if (!manifest!.boards) return { ids: p.ids, tracker: null };
+  const tracker = new BoardTracker(tok!, cropStartFen(moves, p.start), boardOpts());
+  return { ids: p.ids, rows: tracker.rows(p.ids), tracker };
+}
+
 /** Legal-move distribution for the position after `moves` (softmax over legal moves only). */
 async function topMoves(moves: string[], top: number, k: number | null, startFen?: string): Promise<{ moves: MovePrediction[]; ms: number; tokens: number }> {
   const chess = new Chess(startFen);
@@ -483,7 +493,12 @@ async function thinkPick(req: Extract<ToWorker, { type: 'pick' }>): Promise<bool
   for (const m of req.moves) chess.move({ from: m.slice(0, 2), to: m.slice(2, 4), promotion: m[4] });
   if (chess.moves().length === 0) return false;
   const limit = manifest!.max_seq_len;
-  const game = gamePrefix(req.moves, req.contextPlies);
+  // The running thread: the earlier thinks of the game stay in the prompt (oldest dropped first to fit the think)
+  const maxPrior = req.maxPriorThinks ?? DEFAULT_MAX_PRIOR_THINKS;
+  const prior = req.thinks && Object.keys(req.thinks).length && maxPrior > 0
+    ? thinkPrefix(req.moves, req.thinks, req.contextPlies, (req.maxThinkTokens ?? DEFAULT_THINK_MOVE_TOKENS) + 8, maxPrior)
+    : null;
+  const game = prior ?? gamePrefix(req.moves, req.contextPlies);
   // The think fits the context next to the game prompt (as play_move_with_think's budget), at least a few tokens.
   const maxThink = Math.max(8, Math.min(req.maxThinkTokens ?? DEFAULT_THINK_MOVE_TOKENS, limit - game.ids.length - 8));
   const rules: LineRules = {
@@ -496,8 +511,8 @@ async function thinkPick(req: Extract<ToWorker, { type: 'pick' }>): Promise<bool
   const anchor = req.anchor !== false && t.endThinkId !== null ? anchorIds(t, chess.turn() === 'w') : null;
   const cons = new ThinkMoveConstraint(t, chess.fen(), req.think === 'on' ? true : null, maxThink, rules, anchor);
   // Board rows of the generated tokens: a legacy tracker primed with the whole game (its state is the game position).
-  let tracker: BoardTracker | null = null;
-  if (game.rows) {
+  let tracker: BoardTracker | null = prior?.tracker ?? null;
+  if (game.rows && !tracker) {
     tracker = new BoardTracker(t, undefined, boardOpts());
     tracker.rows(t.encodeGame(req.moves, undefined, manifest!.perspective_games ? ChessTokenizer.sideToMove(req.moves.length) : undefined));
   }
@@ -517,7 +532,7 @@ async function thinkPick(req: Extract<ToWorker, { type: 'pick' }>): Promise<bool
     const ids = close < 0 ? out : out.slice(0, close + 1);
     const parts = t.decodeDialogueContent(ids);
     const think = parts[0]?.kind === 'think' ? parts[0].parts : [];
-    return { parts: think, tokens: (close < 0 ? out.length : close) - 1, open: close < 0, raw: t.decode(ids) };
+    return { parts: think, tokens: (close < 0 ? out.length : close) - 1, open: close < 0, raw: t.decode(ids), ...(close < 0 ? {} : { ids: out.slice(0, close + 1) }) };
   };
   const out = await generate({
     id: req.id,
@@ -687,22 +702,24 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
   const t = tok!;
   if (!t.hasText) throw new Error('this model has no text tokenizer');
   let userParts: DialoguePart[] = [];
-  if (req.fen) userParts.push({ kind: 'fen', fen: req.fen });
-  userParts.push({ kind: 'text', text: req.prompt });
-  if (req.context?.length) userParts.push({ kind: 'line', moves: req.context });
-  if (req.contextText) userParts.push({ kind: 'text', text: req.contextText });
+  if (req.parts?.length) userParts = [...req.parts];
+  else {
+    if (req.fen) userParts.push({ kind: 'fen', fen: req.fen });
+    userParts.push({ kind: 'text', text: req.prompt });
+    if (req.context?.length) userParts.push({ kind: 'line', moves: req.context });
+    if (req.contextText) userParts.push({ kind: 'text', text: req.contextText });
+  }
   const tools = req.tools?.names.length && t.supportsTools ? req.tools : null;
   if (tools) userParts = addToolsBlock(userParts, tools.names);
   // Models without the tool tokens cannot read earlier answers' tool calls: leave them out
   if (!t.supportsTools) req.history = req.history.map((h) => ({ ...h, parts: h.parts.filter((p) => p.kind !== 'tool') }));
-  // Earlier turns take at most half the context (the rest is for the think and the answer): oldest exchanges go first
-  const history = [...req.history];
+  // Earlier turns take at most half the context (the rest is for the think and the answer): the earlier answers'
+  // thinks go first (oldest first; generate.fit_history), then the oldest exchanges
+  const history = fitHistory(t, req.history, userParts, manifest!.max_seq_len / 2);
   // A user's game line after an answer's snapshot starts from the initial position again (anchorUserLines)
-  let turns: DialogueTurn[] = anchorUserLines([...history, { role: 'user', parts: userParts }]);
-  while (history.length && t.chatPrompt(turns).length > manifest!.max_seq_len / 2) {
-    history.splice(0, history[1]?.role === 'assistant' ? 2 : 1);
-    turns = anchorUserLines([...history, { role: 'user', parts: userParts }]);
-  }
+  // (exact parts, puzzle mode: the dialogue is laid out as training lays it out -- a retry's refutation line starts
+  // at the puzzle position the answer's snapshot showed -- so nothing is anchored)
+  const turns: DialogueTurn[] = req.parts?.length ? [...history, { role: 'user', parts: userParts }] : anchorUserLines([...history, { role: 'user', parts: userParts }]);
   // <|eos|> <|user|> ... <|assistant|>: the context every training dialogue has (the packer's separator first)
   const prefix = t.chatPrompt(turns);
   const { start } = dialoguePosition(turns);
@@ -795,7 +812,7 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
   if (req.trace) {
     const last = out[out.length - 1];
     const stop = last === t.eosId ? 'eos' : last === t.userId ? 'user' : stopped.has(req.id) ? 'stopped' : 'budget';
-    post({ type: 'chat-trace', id: req.id, trace: { lineEnds, stop, promptTokens: prefix.length, maxTokens, maxThinkTokens: thinking ? maxThink : 0 } });
+    post({ type: 'chat-trace', id: req.id, trace: { lineEnds, stop, promptTokens: prefix.length, prompt: t.decode(prefix), maxTokens, maxThinkTokens: thinking ? maxThink : 0 } });
   }
 }
 

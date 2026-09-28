@@ -52,6 +52,9 @@ export interface ModelManifest {
 
 /** Think budget of a think-then-move pick (think_move.DEFAULT_THINK_TOKENS in ChessMind). */
 export const DEFAULT_THINK_MOVE_TOKENS = 384;
+/** Earlier thinks of the game kept in a think pick's prompt (think_move.DEFAULT_MAX_PRIOR_THINKS: training renders
+ * up to data.game_thinks.chain.max_thinks = 6 thinks per instance, so 5 before the new one). */
+export const DEFAULT_MAX_PRIOR_THINKS = 5;
 /** Think text sampling of a think-then-move pick (play_move_with_think's defaults). */
 export const DEFAULT_THINK_MOVE_TEMPERATURE = 0.8;
 export const DEFAULT_THINK_MOVE_TOP_K = 50;
@@ -63,6 +66,8 @@ export interface PickThink {
   open: boolean;
   /** The think exactly as generated: every token decoded, special tokens and UCI moves included. */
   raw?: string;
+  /** Its token ids `<|think|> ... <|end_think|>` (closed thinks only): fed back as `thinks` of the next picks. */
+  ids?: number[];
 }
 
 export interface MovePrediction {
@@ -88,6 +93,9 @@ export type ToWorker =
       /** The app's context for the position under discussion (promptContext.ts: position note, engine or candidates
        * block), sent as the last text part of the question. */
       contextText?: string;
+      /** The question's parts exactly (puzzle mode: the training layout "goal text, snapshot, last move, position
+       * note"); when set, `prompt` / `fen` / `context` / `contextText` are not used to build the user turn. */
+      parts?: DialoguePart[];
       /** The game from the initial position when only `fen` is sent: not in the prompt, only boards an answer's
        * snapshot may rewind to (the positions along it; the initial position is always one). */
       gameMoves?: string[];
@@ -146,6 +154,11 @@ export type ToWorker =
       /** Open the think with the teacher-forced perspective anchor "I'm playing White, and it's my move." (the side
        * to move; thinkMove.ts anchorIds, ChessMind play_move_with_think(anchor=True)). Default true. */
       anchor?: boolean;
+      /** The running thread: the model's earlier thinks in this game ({ply: PickThink.ids}), kept in the prompt
+       * before the moves they preceded, as training shows them (think_move.prompt_with_thinks; oldest dropped first). */
+      thinks?: Record<number, number[]>;
+      /** At most this many earlier thinks (default DEFAULT_MAX_PRIOR_THINKS; 0 = none). */
+      maxPriorThinks?: number;
     };
 
 /** Why a generated line ended: its <|end_line|> was the only choice (length cap or finished position), P(end) reached
@@ -159,6 +172,8 @@ export interface ChatTrace {
   /** What ended the answer: <|eos|>, a new <|user|> turn, the token budget, or a stop request. */
   stop: 'eos' | 'user' | 'budget' | 'stopped';
   promptTokens: number;
+  /** The whole prompt the model saw, decoded (special tokens included). */
+  prompt?: string;
   maxTokens: number;
   maxThinkTokens: number;
 }
