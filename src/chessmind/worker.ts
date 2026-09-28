@@ -687,7 +687,13 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
   if (req.fen) userParts.push({ kind: 'fen', fen: req.fen });
   userParts.push({ kind: 'text', text: req.prompt });
   if (req.context?.length) userParts.push({ kind: 'line', moves: req.context });
-  const turns: DialogueTurn[] = [...req.history, { role: 'user', parts: userParts }];
+  // Earlier turns take at most half the context (the rest is for the think and the answer): oldest exchanges go first
+  const history = [...req.history];
+  let turns: DialogueTurn[] = [...history, { role: 'user', parts: userParts }];
+  while (history.length && t.chatPrompt(turns).length > manifest!.max_seq_len / 2) {
+    history.splice(0, history[1]?.role === 'assistant' ? 2 : 1);
+    turns = [...history, { role: 'user', parts: userParts }];
+  }
   // <|eos|> <|user|> ... <|assistant|>: the context every training dialogue has (the packer's separator first)
   const prefix = t.chatPrompt(turns);
   const { start, positions } = dialoguePosition(turns);

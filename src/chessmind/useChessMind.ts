@@ -58,9 +58,10 @@ const SETTINGS_VERSION = 2;
 /** Plies of history the simulator gives a board-embedding model (see pick). */
 const SIM_CONTEXT_PLIES = 16;
 const DEFAULTS: ChessMindSettings = { enabled: false, modelId: '', backend: 'auto', arrows: true, aboutPosition: false, sendMoves: true, contextPlies: 'full', think: 'auto', temperature: 0.8, lineEndAnswer: DEFAULT_LINE_RULES.endP.answer, lineEndThink: DEFAULT_LINE_RULES.endP.think, maxLinePliesAnswer: DEFAULT_LINE_RULES.maxPlies.answer, maxLinePliesThink: DEFAULT_LINE_RULES.maxPlies.think };
-/** Earlier chat turns sent with a question. 0: the graph has no KV cache, so every token re-runs the whole
- * sequence and each earlier exchange (~60 tokens) roughly doubles per-token latency. */
-const HISTORY_TURNS = 0;
+/** Earlier chat turns (user + assistant messages) sent with a question, so follow-ups like "no, the other one"
+ * have their context. The KV cache makes the extra prompt a one-off prefill; the worker trims the think budget
+ * (and drops the oldest turns) to fit the context. */
+const HISTORY_TURNS = 6;
 export const CHAT_MAX_TOKENS = 60;
 /** Budget of the hidden reasoning (on top of CHAT_MAX_TOKENS; the worker shrinks it to what the model's context leaves).
  * Training thinks run from ~50 to ~2,000 tokens; the close is forced gracefully at the budget. */
