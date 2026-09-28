@@ -9,6 +9,7 @@ import { Chess } from 'chess.js';
 import type { ChatLeafPart } from '../types';
 import { DEFAULT_MAX_THINK_TOKENS } from './protocol';
 import { LINE_END_LABEL, lineEnding } from './lineRules';
+import { lineText } from './lines';
 import './ThinkingBlock.css';
 
 interface Props {
@@ -115,8 +116,8 @@ export function ThinkingBlock({ parts, open, tokens, done, startFen, resolveFen,
             if (p.kind === 'fen') return <p key={i} className="cm-think-fen">position · {sideOf(p.fen)} to move</p>;
             return (
               <p key={i} className="cm-think-line">
-                {p.moves.length ? sanLine(lineFens[i], p.moves) : '(empty line)'}
-                {p.moves.length > 0 && <LineEndNote fen={lineFens[i]} moves={p.moves} />}
+                {!p.moves.length ? '(empty line)' : p.branches?.length || p.end ? lineText(p, lineFens[i]) : sanLine(lineFens[i], p.moves)}
+                {p.moves.length > 0 && !p.end && !p.branches?.length && <LineEndNote fen={lineFens[i]} moves={p.moves} />}
               </p>
             );
           })}

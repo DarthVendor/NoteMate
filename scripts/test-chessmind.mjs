@@ -3,13 +3,15 @@
 // (src/chessmind/fixtures/tokenizer-v3.json, from ChessMind's scripts/tokenizer_fixture.py): text ids for
 // notation / unicode / whitespace strings, chat prompts, per-side game prompts and cropped per-side board rows; and
 // tokenizer v4 (tokenizer-v4.json, format 4): the same checks plus hidden-reasoning dialogues (encode, board rows, decode);
-// and the KV-cache slide (src/chessmind/kv.ts moveKeys).
+// line branches and end markers (the named format-4 extras: <|branch|>, <|repetition|> ...; encode, rows, decode and
+// the generation mask along each line, src/chessmind/lines.ts LineWalker), and the KV-cache slide (kv.ts moveKeys).
 // Usage: node scripts/test-chessmind.mjs   (Node >= 23: imports the TypeScript sources directly)
 import { existsSync, readFileSync } from 'node:fs';
 import { ChessTokenizer } from '../src/chessmind/tokenizer.ts';
 import { BoardTracker, encodeFen, encodeGameWithBoards } from '../src/chessmind/boards.ts';
 import { moveKeys, rowsHash, sharedPrefix } from '../src/chessmind/kv.ts';
 import { LineWatch, lineEnding, probAmong } from '../src/chessmind/lineRules.ts';
+import { LineWalker, lineVariations, movesToPath, displayLine } from '../src/chessmind/lines.ts';
 
 let kvChecks = 0;
 
@@ -95,7 +97,42 @@ if (existsSync(v4Url)) {
     const dec = t4.decodeDialogueContent(content);
     check(`v4 think decode ${c.name}`, same(dec, c.decoded), `${JSON.stringify(dec)}\n   vs ${JSON.stringify(c.decoded)}`);
   }
-  v4Summary = `${total - before} tokenizer-v4 checks (${f4.thinking.length} thinking cases)`;
+  // Line branches and end markers: the fixture's chess_vocab still lists <|reserved_k|>; they load with the new names.
+  check('v4 named extras', t4.supportsBranches && t4.branchId === t4.extraOffset + 1 && t4.endBranchId === t4.extraOffset + 2 && t4.markerIds.repetition === t4.extraOffset + 3 && t4.markerIds.draw === t4.extraOffset + 4 && t4.markerIds.mate === t4.extraOffset + 5);
+  for (const c of f4.branches ?? []) {
+    const rows = new BoardTracker(t4).rows(c.ids);
+    const bad = rows.findIndex((r, i) => !same(r, c.rows[i]));
+    check(`v4 branch rows ${c.name}`, bad < 0 && rows.length === c.rows.length, bad >= 0 ? `first mismatch at token ${bad} (${t4.decode([c.ids[bad]])}): ${rows[bad]} vs ${c.rows[bad]}` : '');
+    if (!c.turns) continue;
+    const ids = [...t4.encodeDialogue(c.turns), t4.eosId];
+    check(`v4 branch encode ${c.name}`, same(ids, c.ids), `${t4.decode(ids)}\n   vs ${t4.decode(c.ids)}`);
+    check(`v4 branch prompt ${c.name}`, same(t4.chatPrompt(c.turns.slice(0, 1)), c.prompt));
+    const a = c.ids.lastIndexOf(t4.assistantId);
+    const dec = t4.decodeDialogueContent(c.ids.slice(a + 1, -1));
+    check(`v4 branch decode ${c.name}`, same(dec, c.decoded), `${JSON.stringify(dec)}\n   vs ${JSON.stringify(c.decoded)}`);
+  }
+  for (const w of f4.walks ?? []) {
+    const walker = new LineWalker(t4, w.fen ?? undefined);
+    let bad = -1;
+    w.ids.forEach((id, i) => {
+      const got = walker.allowed().sort((x, y) => x - y);
+      if (bad < 0 && !same(got, w.allowed[i])) bad = i;
+      walker.feed(id);
+    });
+    check(`v4 line walk ${w.name}`, bad < 0, bad >= 0 ? `step ${bad} (${t4.decode([w.ids[bad]])}): ${walker.allowed().length} ids vs ${w.allowed[bad].length}` : '');
+  }
+  // Display helpers: the nested case's variations as full move lists and the chips' paths.
+  const nested = (f4.branches ?? []).find((c) => c.name === 'nested');
+  if (nested) {
+    const line = nested.decoded.find((p) => p.kind === 'line');
+    const vars = lineVariations(line);
+    check('lines variations', same(vars.map((v) => v.moves.length), [4, 4, 4, 2]) && same(vars[2].moves, ['e2e4', 'c7c5', 'c2c3', 'd7d5']) && same(vars[2].path, [1, 0, 1, 0]));
+    check('lines movesToPath', same(movesToPath(line, [1, 0, 1, 0, 1]), ['e2e4', 'c7c5', 'c2c3', 'd7d5']) && same(movesToPath(line, [3]), line.moves));
+    const disp = displayLine(line);
+    const sub = disp.branches.get(1);
+    check('lines display', disp.chips.map((c) => c.num + c.san).join(' ') === '1.e4 e5 2.Nf3 Nc6' && sub?.length === 2 && sub[0].chips.map((c) => c.num + c.san).join(' ') === '1…c5 2.Nf3 2…d6' && sub[0].branches.get(1)?.[0].chips[0].num === '2.');
+  }
+  v4Summary = `${total - before} tokenizer-v4 checks (${f4.thinking.length} thinking cases, ${(f4.branches ?? []).length} branch cases, ${(f4.walks ?? []).length} line walks)`;
 }
 // KV cache slide (src/chessmind/kv.ts): keys rotated at position p, moved down by d, equal the keys rotated at p - d.
 {

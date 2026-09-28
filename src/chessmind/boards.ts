@@ -47,6 +47,8 @@ export function encodeFen(fen: string): BoardRow {
 export class TrackedBoard {
   readonly chess: Chess;
   ep: number | null = null;
+  /** The position before each push (FEN + en-passant file), for pop(); copies keep it. */
+  private prev: { fen: string; ep: number | null }[] = [];
   constructor(fen?: string, skipValidation = false) {
     this.chess = new Chess(fen, { skipValidation });
     const ep = fen?.split(' ')[3];
@@ -56,6 +58,7 @@ export class TrackedBoard {
   push(uci: string): boolean {
     const mv = this.chess.moves({ verbose: true }).find((m) => m.lan === uci);
     if (!mv) return false;
+    this.prev.push({ fen: this.chess.fen(), ep: this.ep });
     this.chess.move(mv);
     this.ep = mv.flags.includes('b') ? mv.from.charCodeAt(0) - 97 : null;
     return true;
@@ -63,9 +66,18 @@ export class TrackedBoard {
   row(): BoardRow {
     return encodeBoardState(this.chess, this.ep);
   }
+  /** Take back the last push (false when there is none). */
+  pop(): boolean {
+    const p = this.prev.pop();
+    if (!p) return false;
+    this.chess.load(p.fen, { skipValidation: true });
+    this.ep = p.ep;
+    return true;
+  }
   copy(): TrackedBoard {
     const b = new TrackedBoard(this.chess.fen(), true);
     b.ep = this.ep;
+    b.prev = [...this.prev];
     return b;
   }
 }
@@ -100,6 +112,10 @@ export function boardFromSnapshot(tok: ChessTokenizer, ids: number[]): TrackedBo
  * (format 4): a snapshot taken inside `<|think|> ... <|end_think|>` applies until <|end_think|> only, which shows no
  * board. In-game calculation: a <|line|> while a <|game|> board is active starts from a copy of that board and
  * <|end_line|> returns to it. `startFen`: the first <|game|> starts there (a cropped game).
+ * Line branches (format 5): inside a line <|branch|> starts from the position before the last move of the current
+ * segment (the current position when it has no move yet) and <|end_branch|> returns to the enclosing segment's board;
+ * outside a line (or without an open branch) they keep the row. End markers keep the row; ending the line drops open
+ * branches.
  */
 export class BoardTracker {
   private board: TrackedBoard | null = null;
@@ -119,14 +135,33 @@ export class BoardTracker {
   private inGame = false;
   /** The game board while an in-game <|line|> runs. */
   private gameBoard: TrackedBoard | null = null;
+  private readonly branch: number | null;
+  private readonly endBranch: number | null;
+  /** Enclosing (board, moves in its segment) per open branch. */
+  private frames: { board: TrackedBoard; segMoves: number }[] = [];
+  /** Moves pushed in the current line segment. */
+  private segMoves = 0;
   constructor(tok: ChessTokenizer, startFen?: string) {
     this.tok = tok;
     this.startFen = startFen ?? null;
     this.endThink = tok.endThinkId;
+    this.branch = tok.branchId;
+    this.endBranch = tok.endBranchId;
     this.starts = new Set([tok.gameId, tok.lineId]);
     this.ends = new Set([tok.endLineId, tok.eosId, tok.id('<|pad|>'), tok.bosId, tok.userId, tok.assistantId]);
   }
   feed(id: number): BoardRow {
+    const row = this.feedOne(id);
+    if (this.board === null || this.starts.has(id)) {
+      this.frames = [];
+      this.segMoves = 0;
+    }
+    return row;
+  }
+  private inLine(): boolean {
+    return this.board !== null && (!this.inGame || this.gameBoard !== null);
+  }
+  private feedOne(id: number): BoardRow {
     const tok = this.tok;
     if (this.fenTokens !== null) {
       this.fenTokens.push(id);
@@ -134,6 +169,25 @@ export class BoardTracker {
         this.snapshot = boardFromSnapshot(tok, this.fenTokens);
         this.fenTokens = null;
         if (this.snapshot) this.current = this.snapshot.row();
+      }
+      return this.current;
+    }
+    if (this.branch !== null && id === this.branch) {
+      if (this.inLine()) {
+        this.frames.push({ board: this.board!, segMoves: this.segMoves });
+        this.board = this.board!.copy();
+        if (this.segMoves > 0) this.board.pop();
+        this.segMoves = 0;
+        this.current = this.board.row();
+      }
+      return this.current;
+    }
+    if (this.endBranch !== null && id === this.endBranch) {
+      if (this.inLine() && this.frames.length) {
+        const f = this.frames.pop()!;
+        this.board = f.board;
+        this.segMoves = f.segMoves;
+        this.current = this.board.row();
       }
       return this.current;
     }
@@ -180,7 +234,10 @@ export class BoardTracker {
       this.gameBoard = null;
       this.current = ABSENT_ROW;
     } else if (this.board && tok.isMoveId(id)) {
-      if (this.board.push(tok.idToMove(id))) this.current = this.board.row();
+      if (this.board.push(tok.idToMove(id))) {
+        this.segMoves++;
+        this.current = this.board.row();
+      }
     }
     return this.current;
   }

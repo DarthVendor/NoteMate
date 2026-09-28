@@ -13,6 +13,7 @@ import { ChessTokenizer, type DialoguePart, type DialogueTurn } from './tokenize
 import { BoardTracker, encodeGameWithBoards, N_SLOTS, type BoardRow } from './boards';
 import { KV_SINKS, moveKeys, rowsHash, sharedPrefix } from './kv';
 import { DEFAULT_LINE_RULES, LineWatch, probAmong, type LineRules } from './lineRules';
+import { LineWalker } from './lines';
 import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, ORT_DIR, ORT_SCRIPT_FILE, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type ToWorker } from './protocol';
 
 // Minimal typing of the onnxruntime-web globals used here.
@@ -470,6 +471,8 @@ function sample(logits: Float32Array, allowed: number[], temperature: number, to
 class LineConstraint {
   /** The open line (its board, plies and repetitions). */
   private line: LineWatch | null = null;
+  /** Tokenizers with line branches / end markers: the open line's walker (branches, forced markers, lines.ts). */
+  private walker: LineWalker | null = null;
   private readonly rules: LineRules;
   private readonly t: ChessTokenizer;
   private start: string | undefined;
@@ -532,16 +535,24 @@ class LineConstraint {
       this.inThink = false;
       this.start = this.outerStart;
       this.line = null;
+      this.walker = null;
       return;
     }
     if (id === t.fenId && this.positions.size) this.pickSide = true;
-    else if (id === t.lineId) this.line = new LineWatch(this.start);
-    else if (id === t.endLineId) this.line = null;
+    else if (id === t.lineId) {
+      this.line = new LineWatch(this.start);
+      this.walker = t.supportsBranches ? new LineWalker(t, this.start) : null;
+    } else if (id === t.endLineId) {
+      this.line = null;
+      this.walker = null;
+    } else if (this.walker) this.walker.feed(id);
     else if (this.line && t.isMoveId(id)) this.line.push(t.idToMove(id));
   }
   /** Inside a line with at least one move: the P(<|end_line|>) that ends it (think or answer threshold). */
   endThreshold(): number | null {
-    if (!this.line || this.line.plies === 0 || this.pickSide || this.forced.length) return null;
+    if (!this.line || this.pickSide || this.forced.length) return null;
+    // the threshold is for <|end_line|>: not inside a branch, and only after a main-line move
+    if (this.walker ? this.walker.inBranch || this.walker.plies === 0 : this.line.plies === 0) return null;
     return this.inThink ? this.rules.endP.think : this.rules.endP.answer;
   }
   allowed(out: number[]): number[] {
@@ -556,8 +567,11 @@ class LineConstraint {
     }
     const over = this.inThink && this.maxThinkTokens !== null && this.thinkTokens >= this.maxThinkTokens;
     if (this.line) {
-      if (over) return [t.endLineId];
       const max = this.inThink ? this.rules.maxPlies.think : this.rules.maxPlies.answer;
+      // Branches and end markers: the walker forces the marker of a finished position (the repetition guard) and
+      // closes open branches before the line when the budget or the length cap is spent.
+      if (this.walker) return this.walker.allowed(over || this.walker.plies >= max);
+      if (over) return [t.endLineId];
       if (this.line.plies >= max || (this.rules.stopFinished && this.line.ended())) return [t.endLineId];
       return [...legalUci(this.line.board).map((m) => t.moveToId(m)), t.endLineId];
     }

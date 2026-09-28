@@ -13,6 +13,9 @@
  *   4  format 3 text + `extra_special` tokens placed AFTER the text ids (ids extra_offset + i, extra_offset =
  *      text_offset + text_vocab_size): `<|end_think|>` closes hidden reasoning `<|think|> ... <|end_think|>`.
  *      Every id below extra_offset is shared with format 3; files without `extra_special` behave as before.
+ *      Extras 1-5 were `<|reserved_k|>` placeholders and are now named (same ids): `<|branch|>`, `<|end_branch|>`,
+ *      `<|repetition|>`, `<|draw|>`, `<|mate|>` -- line branches and end markers (lines.ts). A file listing the
+ *      placeholders loads with the new names, as in Python (LEGACY_EXTRA_NAMES).
  * Checked against Python by scripts/test-chessmind.mjs (fixtures from ChessMind's scripts/tokenizer_fixture.py).
  */
 
@@ -46,7 +49,11 @@ interface BpeFile {
 
 export type Perspective = 'white' | 'black';
 
-import type { ChatLeafPart, ChatPart } from '../types';
+import type { ChatLeafPart, ChatLinePart, ChatPart, LineBranch, LineMark } from '../types';
+import { encodeLineTokens } from './lines.ts';
+
+/** Names of the format-4 extras in slot order (tokenizer.EXTRA_SPECIAL_TOKENS); slots 1-5 replace `<|reserved_k|>`. */
+export const EXTRA_SPECIAL_TOKENS = ['<|end_think|>', '<|branch|>', '<|end_branch|>', '<|repetition|>', '<|draw|>', '<|mate|>', '<|reserved_6|>', '<|reserved_7|>'];
 
 /** One part of dialogue content: plain text, a line of UCI moves, a board snapshot (FEN) or (format 4) a think. */
 export type DialoguePart = ChatPart;
@@ -167,7 +174,8 @@ export class ChessTokenizer {
     const pattern = splitPatternOf(bpe?.pre_tokenizer);
     if (this.format >= 3 && bpe && !pattern) throw new Error('format 3 tokenizer.json without a Split pre-tokenizer');
     this.split = pattern ?? SPLIT;
-    this.extraSpecial = chess.extra_special ?? [];
+    // Placeholder names of slots 1-5 load as the names those slots have now (same ids).
+    this.extraSpecial = (chess.extra_special ?? []).map((t, i) => (i >= 1 && i <= 5 && t === `<|reserved_${i}|>` ? EXTRA_SPECIAL_TOKENS[i] : t));
     // Without the BPE file (no text model) the extras' position comes from chess_vocab.json; older files: as before.
     this.extraBase =
       bpe || !this.extraSpecial.length ? this.textOffset + this.textVocabSize : (chess.extra_offset ?? this.textOffset + chess.text_vocab_size);
@@ -191,6 +199,30 @@ export class ChessTokenizer {
   }
   get supportsThinking(): boolean {
     return this.endThinkId !== null;
+  }
+  private extraId(name: string): number | null {
+    const i = this.extraSpecial.indexOf(name);
+    return i < 0 ? null : this.extraOffset + i;
+  }
+  /** `<|branch|>` / `<|end_branch|>` (named format-4 extras), else null. */
+  get branchId(): number | null {
+    return this.extraId('<|branch|>');
+  }
+  get endBranchId(): number | null {
+    return this.extraId('<|end_branch|>');
+  }
+  /** End markers this tokenizer has (`{}` before the named extras). */
+  get markerIds(): Partial<Record<LineMark, number>> {
+    const out: Partial<Record<LineMark, number>> = {};
+    for (const [name, token] of [['mate', '<|mate|>'], ['draw', '<|draw|>'], ['repetition', '<|repetition|>']] as const) {
+      const id = this.extraId(token);
+      if (id !== null) out[name] = id;
+    }
+    return out;
+  }
+  /** Line branches and end markers. */
+  get supportsBranches(): boolean {
+    return this.branchId !== null && this.endBranchId !== null && Object.keys(this.markerIds).length === 3;
   }
   isExtraId(i: number): boolean {
     return i >= this.extraOffset && i < this.size;
@@ -339,30 +371,40 @@ export class ChessTokenizer {
    */
   encodeDialogue(turns: DialogueTurn[]): number[] {
     const ids: number[] = [];
+    // where lines start: the last fen part (a fen inside a think applies until <|end_think|> only)
+    const state: { start?: string } = {};
     for (const turn of turns) {
       ids.push(turn.role === 'user' ? this.userId : this.assistantId);
       turn.parts.forEach((part, i) => {
-        if (part.kind !== 'think') return this.encodePart(part, ids);
+        if (part.kind !== 'think') return this.encodePart(part, ids, state);
         if (turn.role !== 'assistant' || i !== 0) throw new Error('a think part must be the first part of an assistant turn');
         const endThink = this.endThinkId;
         if (endThink === null) throw new Error('this tokenizer has no <|end_think|> (format 4 needed for think parts)');
         ids.push(this.thinkId);
+        const outer = state.start;
         for (const sub of part.parts) {
           if ((sub as DialoguePart).kind === 'think') throw new Error('nested think part');
-          this.encodePart(sub, ids);
+          this.encodePart(sub, ids, state);
         }
         ids.push(endThink);
+        state.start = outer;
       });
     }
     return ids;
   }
 
-  private encodePart(part: ChatLeafPart, ids: number[]): void {
+  private encodePart(part: ChatLeafPart, ids: number[], state: { start?: string }): void {
     if (part.kind === 'text') ids.push(...this.encodeText(part.text));
-    else if (part.kind === 'fen') ids.push(...this.encodeBoard(part.fen));
-    else {
+    else if (part.kind === 'fen') {
+      ids.push(...this.encodeBoard(part.fen));
+      state.start = part.fen;
+    } else {
       ids.push(this.lineId);
-      for (const m of part.moves) ids.push(this.moveToId(m));
+      if (this.supportsBranches) for (const t of encodeLineTokens(part, state.start)) ids.push(this.id(t));
+      else {
+        if (part.branches?.length) throw new Error('this tokenizer has no <|branch|> (line branches need the named format-4 extras)');
+        for (const m of part.moves) ids.push(this.moveToId(m)); // older tokenizers: lines are assumed legal
+      }
       ids.push(this.endLineId);
     }
   }
@@ -383,9 +425,14 @@ export class ChessTokenizer {
     const top: DialoguePart[] = [];
     let think: ChatLeafPart[] | null = null;
     let textRun: number[] = [];
-    let line: string[] | null = null;
+    let line: ChatLinePart | null = null;
+    /** Open branches of `line`, innermost last. */
+    let stack: LineBranch[] = [];
     let fenRun: number[] | null = null;
     const endThink = this.endThinkId;
+    const branch = this.branchId;
+    const endBranch = this.endBranchId;
+    const markers = new Map<number, LineMark>(Object.entries(this.markerIds).map(([k, v]) => [v, k as LineMark]));
     const out = (): (DialoguePart | ChatLeafPart)[] => think ?? top;
     const flush = () => {
       if (textRun.length) {
@@ -405,12 +452,29 @@ export class ChessTokenizer {
         continue;
       }
       if (line !== null) {
+        const cur: ChatLinePart | LineBranch = stack.length ? stack[stack.length - 1] : line;
         if (this.isMoveId(t)) {
-          line.push(this.idToMove(t));
+          cur.moves.push(this.idToMove(t));
           continue;
         }
-        out().push({ kind: 'line', moves: line });
+        if (branch !== null && t === branch) {
+          const sub: LineBranch = { at: cur.moves.length - 1, moves: [] };
+          (cur.branches ??= []).push(sub);
+          stack.push(sub);
+          continue;
+        }
+        if (endBranch !== null && t === endBranch) {
+          stack.pop();
+          continue;
+        }
+        const mark = markers.get(t);
+        if (mark) {
+          cur.end = mark;
+          continue;
+        }
+        out().push(line);
         line = null;
+        stack = [];
         if (t === this.endLineId) continue;
       }
       if (this.isTextId(t)) {
@@ -418,7 +482,7 @@ export class ChessTokenizer {
         continue;
       }
       flush();
-      if (t === this.lineId) line = [];
+      if (t === this.lineId) line = { kind: 'line', moves: [] };
       else if (t === this.fenId) fenRun = [];
       else if (t === this.thinkId && think === null) think = [];
       else if (endThink !== null && t === endThink && think !== null) {
@@ -427,7 +491,7 @@ export class ChessTokenizer {
       }
     }
     flush();
-    if (line !== null) out().push({ kind: 'line', moves: line });
+    if (line !== null) out().push(line);
     if (think !== null) top.push({ kind: 'think', parts: think });
     return top;
   }

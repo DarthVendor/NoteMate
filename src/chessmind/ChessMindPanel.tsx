@@ -9,13 +9,16 @@ import { ArrowUp, ArrowUpToLine, Bot, Eraser, Pause, Play, Square as StopIcon, X
 import type { useChessMind } from './useChessMind';
 import { CHAT_MAX_THINK_TOKENS, CHAT_MAX_TOKENS } from './useChessMind';
 import { LineEndNote, ThinkingBlock } from './ThinkingBlock';
+import { LineChips, MarkLabel } from './LineChips';
+import { createdRoots, nodeAtPath, planLineInsert } from './lineTree';
+import type { LineChip } from './lines';
 import { isAnalysisRequest, parseCommand } from './commands';
 import { ChessMindSettings } from './ChessMindSettings';
 import { uciToSan } from './san';
 import type { GameAction } from '../state/gameReducer';
 import { positionAt, resolveLine } from '../state/gameReducer';
 import { newId } from '../state/pgn';
-import { ROOT_ID, type ChatLineState, type ChatMessage, type GameState } from '../types';
+import { ROOT_ID, type ChatLinePart, type ChatLineState, type ChatMessage, type GameState } from '../types';
 import { ProgressBar } from '../ui/primitives';
 
 type ChessMindState = ReturnType<typeof useChessMind>;
@@ -34,24 +37,6 @@ interface Props {
 }
 
 const mb = (bytes: number) => (bytes / 1e6).toFixed(0);
-
-/** Each move of a UCI line as { label (with move number when due), san }, starting from `fen`. */
-function lineTokens(fen: string | undefined, moves: string[]): { num: string; san: string }[] {
-  const c = new Chess(fen);
-  const out: { num: string; san: string }[] = [];
-  for (const uci of moves) {
-    const no = c.moveNumber();
-    const white = c.turn() === 'w';
-    let san = uci;
-    try {
-      san = c.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] }).san;
-    } catch {
-      /* keep uci */
-    }
-    out.push({ num: white ? `${no}.` : out.length === 0 ? `${no}…` : '', san });
-  }
-  return out;
-}
 
 const PLAY_STEP_MS = 800;
 
@@ -164,32 +149,37 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
   };
   const lineAlive = (l: ChatLineState | undefined) => !!l && !!state.nodes[l.fromId] && l.ids.every((id) => state.nodes[id]);
 
-  /** Insert (or revisit) part `pi` of message `m` as a branch and go to its move `goto` (0 = before the line). */
-  const applyLine = (m: ChatMessage, pi: number, goto: number): ChatLineState | null => {
+  /** Insert (or revisit) part `pi` of message `m` as a branch and go to its move `goto` (0 = before the line); the
+   * line's own branches go in as variations. `at`: go to the move at this chip path instead. */
+  const applyLine = (m: ChatMessage, pi: number, goto: number, at?: number[]): ChatLineState | null => {
     const part = m.parts[pi];
     if (part?.kind !== 'line') return null;
     const existing = m.lines?.[pi];
     if (lineAlive(existing)) {
-      dispatch({ type: 'GOTO', id: goto <= 0 ? existing!.fromId : existing!.ids[goto - 1] });
+      const target = at ? nodeAtPath(part, existing!, at) : goto <= 0 ? existing!.fromId : existing!.ids[goto - 1];
+      if (target && state.nodes[target]) dispatch({ type: 'GOTO', id: target });
       return existing!;
     }
     const origin = lineOrigin(m, pi);
     if (!origin) return null;
-    const newIds = part.moves.map(() => newId());
-    const r = resolveLine(state, origin, part.moves, newIds);
+    const r = resolveLine(state, origin, part.moves, part.moves.map(() => newId()));
     if (!r) return null;
     const before = m.parts[pi - 1];
     const after = m.parts[pi + 1];
     const notes: { at: 'start' | 'end'; text: string; id: string; color: 'chessmind' }[] = [];
     if (before?.kind === 'text' && before.text.trim()) notes.push({ at: 'start', text: before.text.trim(), id: newId(), color: 'chessmind' });
     if (after?.kind === 'text' && after.text.trim() && r.ids.length) notes.push({ at: 'end', text: after.text.trim(), id: newId(), color: 'chessmind' });
-    dispatch({ type: 'ADD_LINE', fromId: origin, moves: part.moves, newIds, gotoIndex: goto, notes });
+    const plan = planLineInsert(state, origin, part, newId, goto, notes);
+    if (!plan) return null;
+    for (const a of plan.actions) dispatch(a);
     const lineState: ChatLineState = {
-      fromId: origin,
-      ids: r.ids,
-      created: r.created,
-      notes: notes.map((n) => ({ id: n.id, nodeId: n.at === 'start' ? origin : r.ids[r.ids.length - 1] })),
+      ...plan.state,
+      notes: notes.map((n) => ({ id: n.id, nodeId: n.at === 'start' ? origin : plan.state.ids[plan.state.ids.length - 1] })),
     };
+    if (at) {
+      const target = nodeAtPath(part, plan.state, at);
+      if (target) dispatch({ type: 'GOTO', id: target });
+    }
     dispatch({ type: 'CHAT_PATCH', id: m.id, patch: { lines: { ...(m.lines ?? {}), [pi]: lineState } } });
     return lineState;
   };
@@ -199,8 +189,8 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
     if (!l) return;
     setPlaying(null);
     for (const n of l.notes) if (state.nodes[n.nodeId]) dispatch({ type: 'DELETE_NOTE', id: n.id, nodeId: n.nodeId });
-    const firstNew = l.ids[l.created.indexOf(true)];
-    if (firstNew && state.nodes[firstNew]) dispatch({ type: 'DELETE_FROM', id: firstNew });
+    // Branches first (their nodes may hang off the line's new moves), then the line itself.
+    for (const id of createdRoots(l)) if (state.nodes[id]) dispatch({ type: 'DELETE_FROM', id });
     const lines = { ...(m.lines ?? {}) };
     delete lines[pi];
     dispatch({ type: 'CHAT_PATCH', id: m.id, patch: { lines } });
@@ -263,39 +253,36 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
-  const renderLine = (m: ChatMessage, pi: number, moves: string[]) => {
+  const renderLine = (m: ChatMessage, pi: number, part: ChatLinePart) => {
+    const moves = part.moves;
     const origin = lineOrigin(m, pi);
     const snap = answerFen(m, pi);
     const startFen = snap ? snapshotFen(m, snap) : (m.fen ?? undefined);
     const l = m.lines?.[pi];
     const alive = lineAlive(l);
-    const tokens = lineTokens(startFen, moves);
     const usable = !!origin || alive;
     const isPlaying = !!playing && alive && playing.ids === l!.ids;
     return (
       <div key={pi} className={`chat-line ${alive ? 'is-in-tree' : ''}`} data-testid="chessmind-line">
-        <div className="chat-line-moves">
-          {tokens.map((t, k) => {
-            const active = alive && l!.ids[k] === state.currentId;
-            return (
-              <button
-                key={k}
-                className={`chat-san ${active ? 'active' : ''}`}
-                disabled={!usable}
-                title={usable ? 'Show this position (adds the line to the move tree)' : 'This game does not start from the initial position'}
-                onClick={() => {
-                  setPlaying(null);
-                  applyLine(m, pi, k + 1);
-                }}
-              >
-                {t.num && <span className="chat-num">{t.num}</span>}
-                {t.san}
-              </button>
-            );
-          })}
-          {moves.length === 0 && <span className="faint">(empty line)</span>}
-          {moves.length > 0 && <LineEndNote fen={startFen} moves={moves} />}
-        </div>
+        <LineChips
+          line={part}
+          fen={startFen}
+          usable={usable}
+          title={usable ? 'Show this position (adds the line and its variations to the move tree)' : 'This game does not start from the initial position'}
+          isActive={(path) => alive && nodeAtPath(part, l!, path) === state.currentId}
+          onPick={(chip: LineChip) => {
+            setPlaying(null);
+            applyLine(m, pi, chip.path.length === 1 ? chip.path[0] + 1 : 0, chip.path.length === 1 ? undefined : chip.path);
+          }}
+        />
+        {moves.length === 0 && (
+          <div className="chat-line-moves">
+            <span className="faint">(empty line)</span>
+            <MarkLabel end={part.end} />
+          </div>
+        )}
+        {/* models without end markers: say how a line that stopped in a finished position ended */}
+        {moves.length > 0 && !part.end && !part.branches?.length && <LineEndNote fen={startFen} moves={moves} />}
         {m.done && moves.length > 0 && usable && (
           <div className="chat-line-actions">
             {isPlaying ? (
@@ -393,7 +380,7 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
       if (p.kind === 'text') run.push(<span key={i}>{p.text} </span>);
       else if (p.kind === 'line') {
         flush(`t${i}`);
-        blocks.push(renderLine(m, i, p.moves));
+        blocks.push(renderLine(m, i, p));
       }
     });
     flush('end');

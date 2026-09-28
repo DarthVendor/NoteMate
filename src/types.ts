@@ -64,8 +64,20 @@ export interface MoveNode {
 
 export const ROOT_ID = 'root';
 
+/** How a line segment ended (format-5 end markers <|mate|> / <|draw|> / <|repetition|>). */
+export type LineMark = 'mate' | 'draw' | 'repetition';
+/** A variation inside a line (<|branch|> ... <|end_branch|>): replaces the enclosing line's move `at` (0-based), like a
+ * PGN parenthesised variation; branches nest. */
+export interface LineBranch {
+  at: number;
+  moves: string[];
+  branches?: LineBranch[];
+  end?: LineMark;
+}
+/** A move line: the main line's UCI moves, its branches and its end marker. */
+export type ChatLinePart = { kind: 'line'; moves: string[]; branches?: LineBranch[]; end?: LineMark };
 /** One part of a ChessMind chat message: text, a line of UCI moves, or a board snapshot. */
-export type ChatLeafPart = { kind: 'text'; text: string } | { kind: 'line'; moves: string[] } | { kind: 'fen'; fen: string };
+export type ChatLeafPart = { kind: 'text'; text: string } | ChatLinePart | { kind: 'fen'; fen: string };
 /** ...or (first part of an assistant answer, format-4 models) hidden reasoning: `<|think|> parts <|end_think|>`. */
 export type ChatPart =
   | ChatLeafPart
@@ -81,6 +93,9 @@ export interface ChatLineState {
   created: boolean[];
   /** Notes added with the line (removed again by Discard). */
   notes: { nodeId: string; id: string }[];
+  /** The line's branches inserted as variations: `path` (lines.ts lineVariations) and the node ids of the whole
+   * variation from the line start (shared moves included). */
+  branches?: { path: number[]; ids: string[]; created: boolean[] }[];
 }
 
 export interface ChatMessage {
