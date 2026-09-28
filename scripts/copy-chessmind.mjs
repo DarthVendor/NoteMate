@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path';
 const src = resolve(process.env.CHESSMIND_EXPORT ?? '../ChessMind/export/onnx');
 const dest = 'public/chessmind';
 // Listed first = default in the app's model selector.
+const CONTEXT_BLOCKS = new Set([]);
 const ORDER = ['v5-250m-s95k', 'v5-250m-s30k', 'v5-250m-s20k', 'restart-v3-250m-s90k', 'restart-v3-250m-s50k', 'medium-100m-live-vast', 'exp-small-board', 'exp-small'];
 const DESCRIPTIONS = {
   'v5-250m-s95k': 'v5 run, step 95,000 (~1.95B of 5.1B tokens). 255M, 2,560 context, hidden reasoning, line markers. Same data recipe as 30k plus openings / puzzles in the games group (35k) and the data-loader fix (40k). Large download (275 MB). int8, KV cache.',
@@ -55,6 +56,8 @@ for (const name of names) {
     step: manifest.step ?? null,
     hasText: files.includes(manifest.files.tokenizer),
     boards: !!manifest.boards,
+    // trained on the ctx1 prompt blocks: the manifest says so, or the model is listed here (v5 checkpoints are not)
+    contextBlocks: !!manifest.context_blocks || CONTEXT_BLOCKS.has(name),
     description: DESCRIPTIONS[name] ?? `${(manifest.params / 1e6).toFixed(0)}M parameters, ${manifest.quant}.`,
   });
 }

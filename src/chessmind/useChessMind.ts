@@ -19,6 +19,8 @@ export interface ChessMindModel {
   hasText: boolean;
   /** Has the board-embedding input. */
   boards?: boolean;
+  /** Trained on the ctx1 prompt blocks ([Position] / [Engine] / [Candidates]); older models get the plain prompt. */
+  contextBlocks?: boolean;
   description?: string;
 }
 

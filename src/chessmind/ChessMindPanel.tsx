@@ -267,7 +267,9 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
     const discussed = fenOpt || context || uciMoves?.length === 0 ? fen : null;
     const pred = cm.prediction && uciMoves && cm.prediction.key.split('|')[0] === uciMoves.join(' ') ? cm.prediction.moves : null;
     const minDepth = engine?.settings.depth ? Math.min(MIN_ENGINE_DEPTH, engine.settings.depth) : MIN_ENGINE_DEPTH;
-    const contextText = discussed
+    // Only models trained on the ctx1 blocks get them: an older model reads an [Engine] block as an engine-review cue
+    // ("Show me the Najdorf" came back as a mistake review of 1.e4)
+    const contextText = discussed && model?.contextBlocks
       ? chatContext({
           fen: discussed,
           engine: engine?.status === 'ready' ? engineInfoFor(discussed, { fen: engine.linesFen, lines: engine.lines, name: engine.engineName }, minDepth) : null,
