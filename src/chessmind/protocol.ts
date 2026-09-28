@@ -61,6 +61,8 @@ export interface PickThink {
   parts: ChatLeafPart[];
   tokens: number;
   open: boolean;
+  /** The think exactly as generated: every token decoded, special tokens and UCI moves included. */
+  raw?: string;
 }
 
 export interface MovePrediction {
@@ -165,7 +167,7 @@ export type FromWorker =
   /** msPerToken: mean of the steps after the first (the first, which reads the prompt, is prefillMs). */
   | { type: 'chat-update'; id: number; parts: DialoguePart[]; tokens: number; msPerToken: number; done: boolean; stopped?: boolean; prefillMs?: number; predictions?: MovePrediction[] }
   /** `think`: the think written before the move (think picks only; absent when the model moved without one). */
-  | { type: 'picked'; id: number; uci: string | null; p: number; ms: number; tokens: number; think?: PickThink }
+  | { type: 'picked'; id: number; uci: string | null; p: number; ms: number; tokens: number; think?: PickThink; top?: MovePrediction[]; prompt?: string }
   | { type: 'error'; id?: number; message: string }
   /** The model called a tool (generation is paused): run `name` on `fen` (the position asked about: the call's line
    * `moves` played from `baseFen`, or the current position) and answer with `tool-result`. `numbers`: move numbers of

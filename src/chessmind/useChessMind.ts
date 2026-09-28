@@ -63,6 +63,10 @@ export interface PickResult {
   tokens: number;
   /** The think written before the move (think picks of models that can think; absent when it moved without one). */
   think?: PickThink;
+  /** The model's 5 most likely moves at the decision, with probabilities. */
+  top?: MovePrediction[];
+  /** The last 512 prompt tokens the model saw (think picks), decoded. */
+  prompt?: string;
 }
 
 /** Think-then-move for pick(): off / the model's choice / always, the think budget, and the streamed think. */
@@ -232,7 +236,7 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
         case 'picked': {
           const p = picks.current.get(m.id);
           picks.current.delete(m.id);
-          p?.resolve({ uci: m.uci, p: m.p, ms: m.ms, tokens: m.tokens, ...(m.think ? { think: m.think } : {}) });
+          p?.resolve({ uci: m.uci, p: m.p, ms: m.ms, tokens: m.tokens, ...(m.think ? { think: m.think } : {}), ...(m.top ? { top: m.top } : {}), ...(m.prompt ? { prompt: m.prompt } : {}) });
           break;
         }
         case 'error':

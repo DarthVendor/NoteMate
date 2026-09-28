@@ -467,7 +467,7 @@ async function pick(req: Extract<ToWorker, { type: 'pick' }>) {
       }
     }
   }
-  post({ type: 'picked', id: req.id, uci: chosen.uci, p: chosen.p, ms: r.ms, tokens: r.tokens });
+  post({ type: 'picked', id: req.id, uci: chosen.uci, p: chosen.p, ms: r.ms, tokens: r.tokens, top: r.moves.slice(0, 5) });
 }
 
 /**
@@ -503,6 +503,7 @@ async function thinkPick(req: Extract<ToWorker, { type: 'pick' }>): Promise<bool
   const textK = req.thinkTopK ?? DEFAULT_THINK_MOVE_TOP_K;
   const lineT = req.lineTemperature ?? DEFAULT_LINE_TEMPERATURE;
   let p = 0;
+  let top: MovePrediction[] | undefined;
   let phase = cons.phase;
   debugTag = `think-pick ${req.moves.length}`;
   debugMoves = req.moves;
@@ -514,7 +515,7 @@ async function thinkPick(req: Extract<ToWorker, { type: 'pick' }>): Promise<bool
     const ids = close < 0 ? out : out.slice(0, close + 1);
     const parts = t.decodeDialogueContent(ids);
     const think = parts[0]?.kind === 'think' ? parts[0].parts : [];
-    return { parts: think, tokens: (close < 0 ? out.length : close) - 1, open: close < 0 };
+    return { parts: think, tokens: (close < 0 ? out.length : close) - 1, open: close < 0, raw: t.decode(ids) };
   };
   const out = await generate({
     id: req.id,
@@ -536,7 +537,14 @@ async function thinkPick(req: Extract<ToWorker, { type: 'pick' }>): Promise<bool
       return { temperature: textT, topK: textK };
     },
     observe: (logits, allowed, next) => {
-      if (t.isMoveId(next) && (phase === 'move' || phase === 'start')) p = probAmong(logits, allowed.filter((i) => t.isMoveId(i)), next);
+      if (t.isMoveId(next) && (phase === 'move' || phase === 'start')) {
+        const moveIds = allowed.filter((i) => t.isMoveId(i));
+        p = probAmong(logits, moveIds, next);
+        top = moveIds
+          .map((i) => ({ uci: t.idToMove(i), p: probAmong(logits, moveIds, i) }))
+          .sort((a, b) => b.p - a.p)
+          .slice(0, 5);
+      }
     },
     endLine: { id: t.endLineId, threshold: () => cons.endThreshold() },
     stops: new Set([t.eosId]),
@@ -552,7 +560,10 @@ async function thinkPick(req: Extract<ToWorker, { type: 'pick' }>): Promise<bool
   });
   cons.sync(out);
   if (cons.move === null) return false;
-  post({ type: 'picked', id: req.id, uci: cons.move, p, ms: performance.now() - t0, tokens: game.ids.length + out.length, think: renderThink(out) });
+  post({
+    type: 'picked', id: req.id, uci: cons.move, p, ms: performance.now() - t0, tokens: game.ids.length + out.length, think: renderThink(out),
+    top, prompt: t.decode(game.ids.slice(-512)),
+  });
   return true;
 }
 

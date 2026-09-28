@@ -4,6 +4,7 @@ import { EngineClient } from '../engine/EngineClient';
 import { ENGINE_BUILDS, resolveEngineSource, type EngineAvailability, type EngineSettings, type EngineSource } from '../engine/engines';
 import type { useChessMind } from '../chessmind/useChessMind';
 import { thinkText } from './exportSim';
+import { uciToSan } from '../chessmind/san';
 import { DEFAULT_THINK_MOVE_TOKENS, type PickThink, type ThinkMode } from '../chessmind/protocol';
 import { pathTo, type GameAction } from '../state/gameReducer';
 import { newId } from '../state/pgn';
@@ -98,7 +99,10 @@ export interface SimMoveTrace {
   ms: number;
   evalText?: string;
   /** Model with thinking on: the reasoning before the move (plain text, lines in SAN), its tokens, cut off or not. */
-  think?: { text: string; tokens: number; open: boolean };
+  think?: { text: string; tokens: number; open: boolean; raw?: string };
+  /** Model: its 5 most likely moves (SAN, probability) and the tail of the prompt it saw (think picks). */
+  top?: { san: string; uci: string; p: number }[];
+  prompt?: string;
 }
 
 export type SimPhase = 'idle' | 'loading' | 'running' | 'paused';
@@ -367,7 +371,9 @@ export function useSimulate(opts: {
             if (s.think !== 'off') setThought(r.think ? { fen, ply, san: null, think: r.think } : null);
             pending = {
               fen, side: 'model', uci: r.uci ?? '', p: r.p, ms: Math.round(wall),
-              ...(r.think ? { think: { text: thinkText(r.think.parts, fen), tokens: r.think.tokens, open: !!r.think.open } } : {}),
+              ...(r.think ? { think: { text: thinkText(r.think.parts, fen), tokens: r.think.tokens, open: !!r.think.open, raw: r.think.raw } } : {}),
+              ...(r.top ? { top: r.top.map((m) => ({ uci: m.uci, san: uciToSan(fen, m.uci), p: Number(m.p.toFixed(4)) })) } : {}),
+              ...(r.prompt ? { prompt: r.prompt } : {}),
             };
             modelMs += wall;
             modelN++;
