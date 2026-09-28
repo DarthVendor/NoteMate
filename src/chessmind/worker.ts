@@ -13,7 +13,7 @@ import { ChessTokenizer, type DialoguePart, type DialogueTurn } from './tokenize
 import { BoardTracker, dialogueSnapshotFens, encodeGameWithBoards, nSlots, type BoardRow, type BoardSync } from './boards';
 import { KV_SINKS, moveKeys, rowsHash, sharedPrefix } from './kv';
 import { DEFAULT_LINE_RULES, probAmong, type LineRules } from './lineRules';
-import { dialoguePosition, rewindCandidates } from './snapshots';
+import { anchorUserLines, dialoguePosition, rewindCandidates } from './snapshots';
 import { LineConstraint, MAX_TOOL_CALLS, ToolConstraint, type GenConstraint, type ToolRequestInfo } from './constraint';
 import { DEFAULT_TOOL_TIMEOUT_MS, RESULT_BUDGET, TOOL_SPECS, addToolsBlock, errorText, fitToolResult, type ToolResultData } from './tools';
 import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, DEFAULT_THINK_MOVE_TEMPERATURE, DEFAULT_THINK_MOVE_TOKENS, DEFAULT_THINK_MOVE_TOP_K, ORT_DIR, ORT_SCRIPT_FILE, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type PickThink, type ToWorker, type ChatTrace } from './protocol';
@@ -684,10 +684,11 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
   if (!t.supportsTools) req.history = req.history.map((h) => ({ ...h, parts: h.parts.filter((p) => p.kind !== 'tool') }));
   // Earlier turns take at most half the context (the rest is for the think and the answer): oldest exchanges go first
   const history = [...req.history];
-  let turns: DialogueTurn[] = [...history, { role: 'user', parts: userParts }];
+  // A user's game line after an answer's snapshot starts from the initial position again (anchorUserLines)
+  let turns: DialogueTurn[] = anchorUserLines([...history, { role: 'user', parts: userParts }]);
   while (history.length && t.chatPrompt(turns).length > manifest!.max_seq_len / 2) {
     history.splice(0, history[1]?.role === 'assistant' ? 2 : 1);
-    turns = [...history, { role: 'user', parts: userParts }];
+    turns = anchorUserLines([...history, { role: 'user', parts: userParts }]);
   }
   // <|eos|> <|user|> ... <|assistant|>: the context every training dialogue has (the packer's separator first)
   const prefix = t.chatPrompt(turns);
