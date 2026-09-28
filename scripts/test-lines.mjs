@@ -82,5 +82,8 @@ const fen = '7k/6p1/7p/8/8/8/r4PPP/4Q1K1 w - - 0 1';
 check('perpetual marker', encodeLineTokens(perpetual, fen).at(-1) === '<|repetition|>');
 check('line text', lineText(line) === '1.e4 e5 (1...c5 2.Nf3 (2.c3 d5) 2...d6) (1...e6) 2.Nf3 Nc6', lineText(line));
 check('line text marker', lineText({ ...perpetual, end: 'repetition' }, fen).endsWith('[draw by repetition]'));
+const checkLine = { moves: ['e2e4', 'f7f5', 'd1h5'], branches: [{ at: 2, moves: ['d2d4'] }] };
+check('check follows the move, before its branch', JSON.stringify(encodeLineTokens(checkLine)) === JSON.stringify(['e2e4', 'f7f5', 'd1h5', '<|check|>', '<|branch|>', 'd2d4', '<|end_branch|>']));
+check('mate shows as # without a label', lineText({ moves: ['f2f3', 'e7e5', 'g2g4', 'd8h4'], end: 'mate' }) === '1.f3 e5 2.g4 Qh4#');
 console.log(`${total - fail}/${total} line-tree checks passed`);
 process.exit(fail ? 1 : 0);

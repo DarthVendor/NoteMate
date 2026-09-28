@@ -1,9 +1,10 @@
 /*
  * The moves of a ChessMind answer line as clickable SAN chips, with its branches (<|branch|> ... <|end_branch|>) as
- * indented variations under the move they replace, and end markers (<|mate|> / <|draw|> / <|repetition|>) as labels.
+ * indented variations under the move they replace, and end markers <|draw|> / <|repetition|> as labels (<|check|> and
+ * <|mate|> show as the SAN's "+" / "#").
  */
 import type { ChatLinePart } from '../types';
-import { displayLine, MARK_LABEL, type DisplaySegment, type LineChip } from './lines';
+import { displayLine, LABELLED_MARKS, MARK_LABEL, type DisplaySegment, type LineChip } from './lines';
 
 interface Props {
   line: ChatLinePart;
@@ -18,7 +19,7 @@ interface Props {
 }
 
 export function MarkLabel({ end }: { end?: ChatLinePart['end'] }) {
-  if (!end) return null;
+  if (!end || !LABELLED_MARKS.includes(end)) return null; // check / mate: the SAN's "+" / "#"
   return (
     <span className={`chat-line-mark mark-${end}`} data-testid="line-mark">
       {MARK_LABEL[end]}

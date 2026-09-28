@@ -4,9 +4,11 @@
  *   - `<|branch|> ... <|end_branch|>` is a variation from the position BEFORE the last move of the enclosing line (or
  *     branch), replacing that move, like a PGN parenthesised variation; branches nest, and <|end_branch|> returns to the
  *     enclosing line's position;
- *   - an end marker closes a segment whose final position is finished: <|mate|> (checkmate), <|draw|> (stalemate,
- *     insufficient material, fifty-move rule) or <|repetition|> (the position already occurred on the segment's path:
- *     the line's start and every position after each move, a branch's path going through its enclosing line).
+ *   - right after a move (before branches replacing it): <|check|> when it gives check, <|mate|> when it mates;
+ *   - after a segment's final move (after its <|check|>, before its branches) the segment's end marker when that
+ *     position is finished: <|draw|> (stalemate, insufficient material, fifty-move rule) or <|repetition|> (the
+ *     position already occurred on the segment's path: the line's start and every position after each move, a
+ *     branch's path going through its enclosing line).
  * Markers are computed from the moves (encodeLineTokens) and forced in generation (LineWalker). Positions compare by
  * FEN placement / side / castling / en passant (chess.js prints the square only when a capture is legal, like
  * python-chess `fen(en_passant="legal")`). Checked against Python by scripts/test-chessmind.mjs.
@@ -17,8 +19,11 @@ import type { ChessTokenizer } from './tokenizer';
 
 export const MAX_BRANCH_DEPTH = 3;
 export const MARKER_TOKENS: Record<LineMark, string> = { mate: '<|mate|>', draw: '<|draw|>', repetition: '<|repetition|>' };
+export const CHECK_TOKEN = '<|check|>';
 /** How the UI labels a line's end marker. */
 export const MARK_LABEL: Record<LineMark, string> = { mate: 'mate', draw: 'draw', repetition: 'draw by repetition' };
+/** Markers shown as a label after a line; check and mate show as "+" / "#" in the SAN instead. */
+export const LABELLED_MARKS: LineMark[] = ['draw', 'repetition'];
 
 /** A line or a branch: moves plus nested branches. */
 export type LineSegment = Pick<ChatLinePart, 'moves' | 'branches' | 'end'>;
@@ -48,14 +53,25 @@ function play(c: Chess, uci: string): boolean {
  * Token strings inside a line (moves, <|branch|> / <|end_branch|>, markers), lines.walk in Python. Throws on an
  * illegal move or a branch without a move to replace. `markers` false: no end markers (older tokenizers).
  */
-export function encodeLineTokens(line: LineSegment, startFen?: string, markers = true): string[] {
+export function encodeLineTokens(line: LineSegment, startFen?: string, markers = true, checks = markers): string[] {
   const board = new Chess(startFen);
   const out: string[] = [];
-  walkSegment(line, board, [positionKey(board)], out, markers);
+  walkSegment(line, board, [positionKey(board)], out, markers, checks);
   return out;
 }
 
-function walkSegment(seg: LineSegment, board: Chess, keys: string[], out: string[], markers: boolean) {
+/** Markers after a move that reached `c` (`keys` ends with its key): mate, or check and (final move) draw / repetition. */
+function moveMarks(c: Chess, keys: string[], last: boolean, checks: boolean): string[] {
+  if (c.isCheckmate()) return [MARKER_TOKENS.mate];
+  const out = checks && c.inCheck() ? [CHECK_TOKEN] : [];
+  if (last) {
+    const end = lineEndOf(c, keys.slice(0, -1).includes(keys[keys.length - 1]));
+    if (end) out.push(MARKER_TOKENS[end]);
+  }
+  return out;
+}
+
+function walkSegment(seg: LineSegment, board: Chess, keys: string[], out: string[], markers: boolean, checks: boolean) {
   const byAt = new Map<number, LineBranch[]>();
   for (const b of seg.branches ?? []) {
     if (b.at < 0 || b.at >= seg.moves.length) throw new Error(`branch at move ${b.at} of a ${seg.moves.length}-move line`);
@@ -67,17 +83,13 @@ function walkSegment(seg: LineSegment, board: Chess, keys: string[], out: string
     if (!play(board, uci)) throw new Error(`illegal move ${uci} in ${before}`);
     keys.push(positionKey(board));
     out.push(uci);
+    if (markers) out.push(...moveMarks(board, keys, i === seg.moves.length - 1, checks));
     for (const b of byAt.get(i) ?? []) {
       out.push('<|branch|>');
-      walkSegment(b, new Chess(before), beforeKeys, out, markers);
+      walkSegment(b, new Chess(before), beforeKeys, out, markers, checks);
       out.push('<|end_branch|>');
     }
   });
-  if (markers && seg.moves.length) {
-    const last = keys[keys.length - 1];
-    const end = lineEndOf(board, keys.slice(0, -1).includes(last));
-    if (end) out.push(MARKER_TOKENS[end]);
-  }
 }
 
 /** Branches at every depth. */
@@ -102,9 +114,10 @@ interface Frame {
 /**
  * Port of lines.LineWalker: the tokens allowed next inside a line being generated. Legal moves always; <|branch|>
  * after a move of the current segment (depth < maxDepth, fewer than maxBranches opened in this line); <|end_branch|>
- * in a branch once it has a move (forced after maxBranchPlies); <|end_line|> outside branches; a finished position
- * allows only its marker (the repetition guard), and after a marker only the segment's end. Tokenizers without the
- * named extras get the old mask: legal moves + <|end_line|>.
+ * in a branch once it has a move (forced after maxBranchPlies); <|end_line|> outside branches. After a move its
+ * markers are forced in order: <|mate|>, or <|check|> then, at a finished position, <|draw|> / <|repetition|> (the
+ * repetition guard); a segment with an end marker or mate takes only its end or a <|branch|> replacing its last
+ * move. Tokenizers without the named extras get the old mask: legal moves + <|end_line|>.
  */
 export class LineWalker {
   board: Chess;
@@ -124,6 +137,9 @@ export class LineWalker {
   private readonly maxBranchPlies: number;
   private readonly markerIds: Partial<Record<LineMark, number>>;
   private readonly markerOf = new Map<number, LineMark>();
+  private readonly checkId: number | null;
+  /** Markers the last move calls for, forced in order. */
+  private pending: number[] = [];
   constructor(t: ChessTokenizer, startFen?: string, o: WalkerOptions = {}) {
     this.t = t;
     this.board = new Chess(startFen);
@@ -134,6 +150,15 @@ export class LineWalker {
     this.maxBranchPlies = o.maxBranchPlies ?? 12;
     this.markerIds = this.branchesOn ? t.markerIds : {};
     for (const [name, id] of Object.entries(this.markerIds)) this.markerOf.set(id, name as LineMark);
+    this.checkId = this.branchesOn ? t.checkId : null;
+  }
+  private marksAfterMove(): number[] {
+    if (!this.markerOf.size) return [];
+    if (this.board.isCheckmate()) return [this.markerIds.mate!];
+    const out = this.checkId !== null && this.board.inCheck() ? [this.checkId] : [];
+    const end = lineEndOf(this.board, this.keys.slice(0, -1).includes(this.keys[this.keys.length - 1]));
+    if (end) out.push(this.markerIds[end]!);
+    return out;
   }
   get depth(): number {
     return this.frames.length;
@@ -160,7 +185,12 @@ export class LineWalker {
       this.keys.push(positionKey(this.board));
       this.segMoves++;
       if (!this.frames.length) this.plies++;
+      this.pending = this.marksAfterMove();
+    } else if (this.pending.length && id === this.pending[0]) {
+      this.pending.shift();
+      if (this.markerOf.has(id)) this.ended = true; // mate / draw / repetition end the segment
     } else if (this.branchesOn && id === t.branchId) {
+      this.pending = [];
       this.frames.push({ board: this.board, keys: this.keys, fens: this.fens, segMoves: this.segMoves, ended: this.ended });
       this.keys = [...this.keys];
       this.fens = [...this.fens];
@@ -178,19 +208,20 @@ export class LineWalker {
       this.fens = f.fens;
       this.segMoves = f.segMoves;
       this.ended = f.ended;
+      this.pending = [];
     } else if (this.markerOf.has(id)) this.ended = true;
   }
   /** Ids allowed next; `close`: the caller wants the line closed (budget spent), only the end token. */
   allowed(close = false): number[] {
     const end = this.endId();
-    if (this.ended) return [end];
-    const mark = this.finished();
-    if (mark) return [this.markerIds[mark]!];
+    if (this.pending.length) return [this.pending[0]]; // <|check|> / <|mate|> / an end marker right after the move
+    const canBranch = this.segMoves > 0 && this.frames.length < this.maxDepth && this.nBranches < this.maxBranches;
+    if (this.ended) return canBranch && !close ? [end, this.t.branchId!] : [end]; // close, or branch off the last move
     if (close) return [end];
     if (this.frames.length && this.segMoves >= this.maxBranchPlies) return [end];
     const ids = this.board.moves({ verbose: true }).map((m) => this.t.moveToId(m.lan));
     if (!this.frames.length || this.segMoves > 0) ids.push(end);
-    if (this.segMoves > 0 && this.frames.length < this.maxDepth && this.nBranches < this.maxBranches) ids.push(this.t.branchId!);
+    if (canBranch) ids.push(this.t.branchId!);
     return ids;
   }
 }
@@ -293,7 +324,7 @@ export function lineText(line: LineSegment, fen?: string): string {
       words.push(`${c.num.replace('…', '...')}${c.san}`);
       for (const b of d.branches.get(k) ?? []) words.push(`(${seg(b)})`);
     });
-    if (d.end) words.push(`[${MARK_LABEL[d.end]}]`);
+    if (d.end && LABELLED_MARKS.includes(d.end)) words.push(`[${MARK_LABEL[d.end]}]`);
     return words.join(' ');
   };
   return seg(displayLine(line, fen));

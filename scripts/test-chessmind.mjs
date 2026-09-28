@@ -98,7 +98,7 @@ if (existsSync(v4Url)) {
     check(`v4 think decode ${c.name}`, same(dec, c.decoded), `${JSON.stringify(dec)}\n   vs ${JSON.stringify(c.decoded)}`);
   }
   // Line branches and end markers: the fixture's chess_vocab still lists <|reserved_k|>; they load with the new names.
-  check('v4 named extras', t4.supportsBranches && t4.branchId === t4.extraOffset + 1 && t4.endBranchId === t4.extraOffset + 2 && t4.markerIds.repetition === t4.extraOffset + 3 && t4.markerIds.draw === t4.extraOffset + 4 && t4.markerIds.mate === t4.extraOffset + 5);
+  check('v4 named extras', t4.supportsBranches && t4.branchId === t4.extraOffset + 1 && t4.endBranchId === t4.extraOffset + 2 && t4.markerIds.repetition === t4.extraOffset + 3 && t4.markerIds.draw === t4.extraOffset + 4 && t4.markerIds.mate === t4.extraOffset + 5 && t4.checkId === t4.extraOffset + 6 && t4.extraSpecial[7] === '<|reserved_7|>');
   for (const c of f4.branches ?? []) {
     const rows = new BoardTracker(t4).rows(c.ids);
     const bad = rows.findIndex((r, i) => !same(r, c.rows[i]));

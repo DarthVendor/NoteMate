@@ -13,8 +13,8 @@
  *   4  format 3 text + `extra_special` tokens placed AFTER the text ids (ids extra_offset + i, extra_offset =
  *      text_offset + text_vocab_size): `<|end_think|>` closes hidden reasoning `<|think|> ... <|end_think|>`.
  *      Every id below extra_offset is shared with format 3; files without `extra_special` behave as before.
- *      Extras 1-5 were `<|reserved_k|>` placeholders and are now named (same ids): `<|branch|>`, `<|end_branch|>`,
- *      `<|repetition|>`, `<|draw|>`, `<|mate|>` -- line branches and end markers (lines.ts). A file listing the
+ *      Extras 1-6 were `<|reserved_k|>` placeholders and are now named (same ids): `<|branch|>`, `<|end_branch|>`,
+ *      `<|repetition|>`, `<|draw|>`, `<|mate|>`, `<|check|>` -- line branches and markers (lines.ts). A file listing the
  *      placeholders loads with the new names, as in Python (LEGACY_EXTRA_NAMES).
  * Checked against Python by scripts/test-chessmind.mjs (fixtures from ChessMind's scripts/tokenizer_fixture.py).
  */
@@ -52,8 +52,8 @@ export type Perspective = 'white' | 'black';
 import type { ChatLeafPart, ChatLinePart, ChatPart, LineBranch, LineMark } from '../types';
 import { encodeLineTokens } from './lines.ts';
 
-/** Names of the format-4 extras in slot order (tokenizer.EXTRA_SPECIAL_TOKENS); slots 1-5 replace `<|reserved_k|>`. */
-export const EXTRA_SPECIAL_TOKENS = ['<|end_think|>', '<|branch|>', '<|end_branch|>', '<|repetition|>', '<|draw|>', '<|mate|>', '<|reserved_6|>', '<|reserved_7|>'];
+/** Names of the format-4 extras in slot order (tokenizer.EXTRA_SPECIAL_TOKENS); slots 1-6 replace `<|reserved_k|>`. */
+export const EXTRA_SPECIAL_TOKENS = ['<|end_think|>', '<|branch|>', '<|end_branch|>', '<|repetition|>', '<|draw|>', '<|mate|>', '<|check|>', '<|reserved_7|>'];
 
 /** One part of dialogue content: plain text, a line of UCI moves, a board snapshot (FEN) or (format 4) a think. */
 export type DialoguePart = ChatPart;
@@ -175,7 +175,7 @@ export class ChessTokenizer {
     if (this.format >= 3 && bpe && !pattern) throw new Error('format 3 tokenizer.json without a Split pre-tokenizer');
     this.split = pattern ?? SPLIT;
     // Placeholder names of slots 1-5 load as the names those slots have now (same ids).
-    this.extraSpecial = (chess.extra_special ?? []).map((t, i) => (i >= 1 && i <= 5 && t === `<|reserved_${i}|>` ? EXTRA_SPECIAL_TOKENS[i] : t));
+    this.extraSpecial = (chess.extra_special ?? []).map((t, i) => (i >= 1 && i <= 6 && t === `<|reserved_${i}|>` ? EXTRA_SPECIAL_TOKENS[i] : t));
     // Without the BPE file (no text model) the extras' position comes from chess_vocab.json; older files: as before.
     this.extraBase =
       bpe || !this.extraSpecial.length ? this.textOffset + this.textVocabSize : (chess.extra_offset ?? this.textOffset + chess.text_vocab_size);
@@ -219,6 +219,10 @@ export class ChessTokenizer {
       if (id !== null) out[name] = id;
     }
     return out;
+  }
+  /** `<|check|>` (slot 6): follows every checking (not mating) move inside a line; null if absent. */
+  get checkId(): number | null {
+    return this.extraId('<|check|>');
   }
   /** Line branches and end markers. */
   get supportsBranches(): boolean {
@@ -400,7 +404,7 @@ export class ChessTokenizer {
       state.start = part.fen;
     } else {
       ids.push(this.lineId);
-      if (this.supportsBranches) for (const t of encodeLineTokens(part, state.start)) ids.push(this.id(t));
+      if (this.supportsBranches) for (const t of encodeLineTokens(part, state.start, true, this.checkId !== null)) ids.push(this.id(t));
       else {
         if (part.branches?.length) throw new Error('this tokenizer has no <|branch|> (line branches need the named format-4 extras)');
         for (const m of part.moves) ids.push(this.moveToId(m)); // older tokenizers: lines are assumed legal
@@ -432,6 +436,7 @@ export class ChessTokenizer {
     const endThink = this.endThinkId;
     const branch = this.branchId;
     const endBranch = this.endBranchId;
+    const check = this.checkId;
     const markers = new Map<number, LineMark>(Object.entries(this.markerIds).map(([k, v]) => [v, k as LineMark]));
     const out = (): (DialoguePart | ChatLeafPart)[] => think ?? top;
     const flush = () => {
@@ -472,6 +477,7 @@ export class ChessTokenizer {
           cur.end = mark;
           continue;
         }
+        if (check !== null && t === check) continue; // derived from the moves (the SAN "+")
         out().push(line);
         line = null;
         stack = [];
