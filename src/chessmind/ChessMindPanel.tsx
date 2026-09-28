@@ -149,14 +149,19 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
     }
     return undefined;
   };
-  /** The asked-at node or its parent when that is snapshot `snap`'s position (placement + side). */
+  /** The node on the asked-at node's path (itself first, then each ancestor back to the start: answers may rewind to
+   * any point of the game) whose position is snapshot `snap`'s (placement + side). A decoded snapshot carries no move
+   * number or castling rights, so its lines are numbered from this node's full FEN. */
   const snapshotNode = (m: ChatMessage, snap: string): string | null => {
     const key = (f: string) => f.split(' ').slice(0, 2).join(' ');
-    const at = m.originId && state.nodes[m.originId] ? m.originId : null;
-    const cands = at ? [at, state.nodes[at].parent] : [];
-    return cands.find((id) => id && key(positionAt(state, id).fen()) === key(snap)) ?? null;
+    const want = key(snap);
+    for (let id: string | null = m.originId && state.nodes[m.originId] ? m.originId : ROOT_ID; id && state.nodes[id]; id = state.nodes[id].parent ?? null) {
+      if (key(positionAt(state, id).fen()) === want) return id;
+      if (id === ROOT_ID) break;
+    }
+    return null;
   };
-  /** A snapshot's full FEN (move number, castling) when it is the asked-at position or the one before. */
+  /** A snapshot's full FEN (move number, castling) when it is a position on the asked-at node's path. */
   const snapshotFen = (m: ChatMessage, snap: string): string => {
     const id = snapshotNode(m, snap);
     return id ? positionAt(state, id).fen() : snap;
