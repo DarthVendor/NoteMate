@@ -30,7 +30,7 @@ const diff = (got, want) => {
 check('width with every feature', nSlots(fx.features) === 68 + 5 + 10 + 16 + 64 + 64);
 for (const s of fx.sequences) {
   for (const [key, cfg] of Object.entries(fx.configs)) {
-    const rows = enc(new BoardTracker(tok, s.start_fen ?? undefined, cfg).rows(s.ids));
+    const rows = enc(new BoardTracker(tok, s.start_fen ?? undefined, { ...cfg, snapshotFens: s.snapshot_fens ?? undefined }).rows(s.ids));
     check(`${s.name} [${key}]`, diff(rows, s.rows[key]) === '', diff(rows, s.rows[key]));
   }
   // flags off: the legacy tracker is untouched

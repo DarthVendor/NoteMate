@@ -73,6 +73,19 @@ export function encodeBoardState(chess: Chess, epFile: number | null): BoardRow 
   return row;
 }
 
+/** The FEN of every `fen` part of a dialogue's turns in encoding order (think parts included): boards.dialogue_snapshot_fens. */
+export function dialogueSnapshotFens(turns: { parts: { kind: string; fen?: string; parts?: unknown[] }[] }[]): string[] {
+  const out: string[] = [];
+  const walk = (parts: { kind: string; fen?: string; parts?: unknown[] }[]) => {
+    for (const p of parts) {
+      if (p.kind === 'fen' && p.fen) out.push(p.fen);
+      else if (p.kind === 'think' && p.parts) walk(p.parts as { kind: string; fen?: string; parts?: unknown[] }[]);
+    }
+  };
+  for (const t of turns) walk(t.parts);
+  return out;
+}
+
 /** Row for a FEN (en-passant square taken verbatim from the FEN, as python-chess does). */
 export function encodeFen(fen: string): BoardRow {
   const ep = fen.split(' ')[3];
@@ -355,15 +368,25 @@ export class BoardTracker {
   private podRow: BoardRow | null = null;
   /** The pod before <|think|> (with the snapshot in thinkSaved). */
   private thinkPod: BoardRow | null = null;
-  /** The current board descends from a snapshot: no clocks, no history. */
+  /** The current board descends from a snapshot: no history (repetitions before it). */
   private blind = false;
-  constructor(tok: ChessTokenizer, startFen?: string, opts: { sync?: BoardSync; features?: readonly string[] } = {}) {
+  /** Its halfmove clock / move number are real (a snapshot without its FEN: unknown). */
+  private clocks = true;
+  /** v6: the full FENs of the snapshots in order (boards.dialogue_snapshot_fens); ignored by legacy rows. */
+  private readonly fens: (string | null)[];
+  private nSnapshots = 0;
+  constructor(
+    tok: ChessTokenizer,
+    startFen?: string,
+    opts: { sync?: BoardSync; features?: readonly string[]; snapshotFens?: (string | null)[] } = {},
+  ) {
     this.tok = tok;
     this.startFen = startFen ?? null;
     this.pod = (opts.sync ?? 'legacy') === 'pod';
     this.features = normalizeFeatures(opts.features);
     this.absent = this.features.length ? new Array(nSlots(this.features)).fill(ABSENT) : ABSENT_ROW;
     this.current = this.absent;
+    this.fens = this.pod || this.features.length ? [...(opts.snapshotFens ?? [])] : [];
     this.endThink = tok.endThinkId;
     this.branch = tok.branchId;
     this.endBranch = tok.endBranchId;
@@ -385,7 +408,7 @@ export class BoardTracker {
     const row = b.row();
     if (!this.features.length) return row;
     const rep = !this.blind || b.hasHistory() ? b.repetitions() : null;
-    return row.concat(featurePlanes(b, this.features, kind, !this.blind, rep));
+    return row.concat(featurePlanes(b, this.features, kind, this.clocks, rep));
   }
   private lineKind(): number {
     return this.inGame && this.gameBoard === null ? KIND_GAME : KIND_LINE;
@@ -400,6 +423,21 @@ export class BoardTracker {
       if (this.fenTokens.length === 65) {
         this.snapshot = boardFromSnapshot(tok, this.fenTokens);
         this.fenTokens = null;
+        const fen = this.fens[this.nSnapshots] ?? null;
+        this.nSnapshots++;
+        this.clocks = false;
+        if (this.snapshot && fen) {
+          try {
+            const full = new TrackedBoard(fen);
+            const key = (f: string) => f.split(' ').slice(0, 2).join(' ');
+            if (key(full.chess.fen()) === key(this.snapshot.chess.fen())) {
+              this.snapshot = full;
+              this.clocks = true;
+            }
+          } catch {
+            // a malformed FEN: the snapshot keeps unknown clocks
+          }
+        }
         if (this.snapshot) {
           this.blind = true;
           this.current = this.enc(this.snapshot, KIND_DISCUSSED);
@@ -476,12 +514,14 @@ export class BoardTracker {
         this.board = new TrackedBoard(this.startFen);
         this.startFen = null; // only the first game of the sequence
         this.blind = false;
+        this.clocks = true;
       } else if (id === tok.lineId && this.snapshot) {
         this.board = this.snapshot.copy(false);
         this.blind = true;
       } else {
         this.board = new TrackedBoard();
         this.blind = false;
+        this.clocks = true;
       }
       this.inGame = id === tok.gameId;
       this.current = this.enc(this.board, this.inGame ? KIND_GAME : KIND_LINE);

@@ -10,7 +10,7 @@
  */
 import { Chess } from 'chess.js';
 import { ChessTokenizer, type DialoguePart, type DialogueTurn } from './tokenizer';
-import { BoardTracker, encodeGameWithBoards, nSlots, type BoardRow, type BoardSync } from './boards';
+import { BoardTracker, dialogueSnapshotFens, encodeGameWithBoards, nSlots, type BoardRow, type BoardSync } from './boards';
 import { KV_SINKS, moveKeys, rowsHash, sharedPrefix } from './kv';
 import { DEFAULT_LINE_RULES, probAmong, type LineRules } from './lineRules';
 import { dialoguePosition, rewindCandidates } from './snapshots';
@@ -712,7 +712,8 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
         return fit.ids;
       }
     : undefined;
-  const tracker = manifest!.boards ? new BoardTracker(t, undefined, boardOpts()) : null;
+  // v6 rows take the snapshots' clocks / castling / en passant from their FENs (not a text note)
+  const tracker = manifest!.boards ? new BoardTracker(t, undefined, { ...boardOpts(), snapshotFens: dialogueSnapshotFens(turns) }) : null;
   const endThink = t.endThinkId;
   await generate({
     id: req.id,
