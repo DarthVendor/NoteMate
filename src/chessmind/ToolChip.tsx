@@ -41,7 +41,7 @@ interface Props {
 export function ToolChip({ part, startFen }: Props) {
   const [open, setOpen] = useState(false);
   const bodyId = useId();
-  const pending = part.result === undefined;
+  const pending = part.result === undefined || (!part.result.trim() && part.ok === undefined);
   const failed = !pending && (part.ok === false || /: no result \(/.test(part.result ?? ''));
   const line = callLine(part, startFen);
   const where = line ? `after ${line}` : 'current position';

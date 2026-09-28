@@ -99,7 +99,7 @@ export function toolCalls(parts: ChatPart[]): ChatToolPart[] {
 /** Short chip label of a call: "Engine: +0.4, best Nf3", "Engine: no result (timeout)", "Engine…" while pending. */
 export function toolChipLabel(p: ChatToolPart): string {
   const title = TOOL_SPECS[p.name]?.label ?? (p.name ? p.name[0].toUpperCase() + p.name.slice(1) : 'Tool');
-  if (p.result === undefined) return `${title}…`;
+  if (p.result === undefined || (!p.result.trim() && p.ok === undefined)) return `${title}…`; // still running
   const r = p.result.trim();
   const err = /no result \(([^)]*)\)/.exec(r);
   if (err) return `${title}: no result (${err[1]})`;
