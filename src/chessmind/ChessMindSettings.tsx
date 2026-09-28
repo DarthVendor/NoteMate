@@ -88,8 +88,19 @@ export function ChessMindSettings({ cm }: { cm: ChessMindState }) {
             </span>
             <input type="range" min={0.05} max={1} step={0.05} value={settings.lineEndThink} onChange={(e) => update({ lineEndThink: Number(e.target.value) })} data-testid="chessmind-line-end-think" />
             <span className="field-hint">
-              A line stops once the model gives ending it this much probability (1 = only as its top choice), at {DEFAULT_LINE_RULES.maxPlies.answer} plies ({DEFAULT_LINE_RULES.maxPlies.think} while reasoning), or at mate, stalemate or a repeated position.
+              A line stops once the model gives ending it this much probability (1 = only as its top choice), at the length cap below, or at mate, stalemate or a repeated position.
             </span>
+          </label>
+          <label className="field">
+            <span className="field-label">
+              Line length cap <span className="mono faint">answer {settings.maxLinePliesAnswer} plies</span>
+            </span>
+            <input type="range" min={2} max={40} step={1} value={settings.maxLinePliesAnswer} onChange={(e) => update({ maxLinePliesAnswer: Number(e.target.value) })} data-testid="chessmind-max-plies-answer" />
+            <span className="field-label">
+              <span className="mono faint">reasoning {settings.maxLinePliesThink} plies</span>
+            </span>
+            <input type="range" min={2} max={40} step={1} value={settings.maxLinePliesThink} onChange={(e) => update({ maxLinePliesThink: Number(e.target.value) })} data-testid="chessmind-max-plies-think" />
+            <span className="field-hint">A move line is cut after this many half-moves; the model can end it sooner (it is trained on lines of at most {DEFAULT_LINE_RULES.maxPlies.think} plies).</span>
           </label>
           <label className="check-row">
             <span className="check-text">
