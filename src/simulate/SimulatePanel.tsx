@@ -10,6 +10,7 @@ import { keepArrows } from '../ui/keepArrows';
 import { MenuLabel, Popover } from '../ui/Popover';
 import { ThinkingBlock } from '../chessmind/ThinkingBlock';
 import { DEFAULT_THINK_MOVE_TOKENS } from '../chessmind/protocol';
+import { Segmented } from '../ui/primitives';
 
 interface Props {
   sim: ReturnType<typeof useSimulate>;
@@ -101,6 +102,21 @@ export function SimulatePanel({ sim, cm, state, dispatch, onExport }: Props) {
           {s.think !== 'off' && `, ${s.think === 'on' ? 'thinking' : 'thinking when it chooses'} (≤${s.thinkTokens} tokens)`} vs Stockfish <b>skill {s.skill}</b>{' '}
           <span className="faint">(≈{skillElo(s.skill)})</span> at {limitLabel(s)}/move · <b>{s.games}</b> game{s.games === 1 ? '' : 's'} from the {s.start === 'current' ? 'current' : 'initial'} position
         </p>
+        {canThink && (
+          <div className="sim-think-toggle" title="Think in English before each ChessMind move: off, the model decides, or always" data-testid="sim-think-toggle">
+            <span className="sim-think-label">Think</span>
+            <Segmented
+              label="Think before moving"
+              value={s.think}
+              onChange={(v) => !busy && update({ think: v })}
+              options={[
+                { value: 'off', label: 'Off' },
+                { value: 'auto', label: 'Auto' },
+                { value: 'on', label: 'On' },
+              ]}
+            />
+          </div>
+        )}
         <Popover
           label="Simulation setup"
           width={340}

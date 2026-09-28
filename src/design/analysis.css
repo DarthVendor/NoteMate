@@ -325,3 +325,7 @@
 .rv-san { font-family: var(--font-mono); }
 .rv-loss { font-family: var(--font-mono); color: var(--text-2); font-variant-numeric: tabular-nums; }
 .rv-best { grid-column: 2 / -1; }
+
+.sim-think-toggle { display: flex; align-items: center; gap: 6px; flex: none; }
+.sim-think-label { font-size: var(--fs-sm); color: var(--text-3); }
+.sim-think-toggle .segmented button { height: 22px; padding: 0 9px; font-size: var(--fs-sm); }
