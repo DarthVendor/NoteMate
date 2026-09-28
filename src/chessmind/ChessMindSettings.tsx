@@ -2,6 +2,7 @@
 import { SlidersHorizontal } from 'lucide-react';
 import type { useChessMind } from './useChessMind';
 import { CHAT_MAX_THINK_TOKENS } from './useChessMind';
+import { DEFAULT_LINE_RULES } from './lineRules';
 import { MenuDivider, MenuLabel, Popover } from '../ui/Popover';
 import { keepArrows } from '../ui/keepArrows';
 
@@ -61,11 +62,13 @@ export function ChessMindSettings({ cm }: { cm: ChessMindState }) {
             <label className="field">
               <span className="field-label">Think before answering</span>
               <select className="select" value={settings.think} onChange={(e) => update({ think: e.target.value as typeof settings.think })} data-testid="chessmind-think-mode">
-                <option value="on">Always</option>
                 <option value="auto">Model decides</option>
+                <option value="on">Always</option>
                 <option value="off">Never</option>
               </select>
-              <span className="field-hint">Hidden reasoning, up to {CHAT_MAX_THINK_TOKENS} tokens, shown collapsed above the answer.</span>
+              <span className="field-hint">
+                Hidden reasoning, up to {CHAT_MAX_THINK_TOKENS} tokens, shown collapsed above the answer. The model learned to reason on engine reviews of game positions: forced on other questions (openings, plans) it tends to review an invented game.
+              </span>
             </label>
           )}
           <label className="field">
@@ -74,6 +77,19 @@ export function ChessMindSettings({ cm }: { cm: ChessMindState }) {
             </span>
             <input type="range" min={0} max={1.5} step={0.05} value={settings.temperature} onChange={(e) => update({ temperature: Number(e.target.value) })} data-testid="chessmind-temperature" />
             <span className="field-hint">Applies to the words only: move lines always use the model's top choice.</span>
+          </label>
+          <label className="field">
+            <span className="field-label">
+              Line end threshold <span className="mono faint">answer {settings.lineEndAnswer.toFixed(2)}</span>
+            </span>
+            <input type="range" min={0.05} max={1} step={0.05} value={settings.lineEndAnswer} onChange={(e) => update({ lineEndAnswer: Number(e.target.value) })} data-testid="chessmind-line-end-answer" />
+            <span className="field-label">
+              <span className="mono faint">reasoning {settings.lineEndThink.toFixed(2)}</span>
+            </span>
+            <input type="range" min={0.05} max={1} step={0.05} value={settings.lineEndThink} onChange={(e) => update({ lineEndThink: Number(e.target.value) })} data-testid="chessmind-line-end-think" />
+            <span className="field-hint">
+              A line stops once the model gives ending it this much probability (1 = only as its top choice), at {DEFAULT_LINE_RULES.maxPlies.answer} plies ({DEFAULT_LINE_RULES.maxPlies.think} while reasoning), or at mate, stalemate or a repeated position.
+            </span>
           </label>
           <label className="check-row">
             <span className="check-text">
@@ -85,7 +101,7 @@ export function ChessMindSettings({ cm }: { cm: ChessMindState }) {
           <label className="check-row">
             <span className="check-text">
               <span>Lines start from this position</span>
-              <span className="field-hint">Sends a board snapshot instead of the move list</span>
+              <span className="field-hint">Sends a board snapshot instead of the move list. A snapshot has no history, so the model may invent how the game got here; the move list grounds it better.</span>
             </span>
             <input type="checkbox" checked={settings.aboutPosition} onChange={(e) => update({ aboutPosition: e.target.checked })} data-testid="chessmind-about-position" />
           </label>

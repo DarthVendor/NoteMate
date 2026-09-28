@@ -133,3 +133,10 @@
   font-size: var(--fs-xs, 11.5px);
   background-position: right 6px center;
 }
+
+/* Why a line stopped: "(draw by repetition)", "(stalemate)", ... */
+.cm-line-end {
+  color: var(--text-3);
+  font-style: italic;
+  white-space: nowrap;
+}

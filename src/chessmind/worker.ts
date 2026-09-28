@@ -11,7 +11,8 @@
 import { Chess } from 'chess.js';
 import { ChessTokenizer, type DialoguePart, type DialogueTurn } from './tokenizer';
 import { BoardTracker, encodeGameWithBoards, N_SLOTS, type BoardRow } from './boards';
-import { KV_SINKS, moveKeys } from './kv';
+import { KV_SINKS, moveKeys, rowsHash, sharedPrefix } from './kv';
+import { DEFAULT_LINE_RULES, LineWatch, probAmong, type LineRules } from './lineRules';
 import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, ORT_DIR, ORT_SCRIPT_FILE, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type ToWorker } from './protocol';
 
 // Minimal typing of the onnxruntime-web globals used here.
@@ -38,6 +39,12 @@ let session: OrtSession | null = null;
 let tok: ChessTokenizer | null = null;
 let manifest: ModelManifest | null = null;
 const stopped = new Set<number>();
+/** Debug mode (localStorage notemate.chessmind.debug = 1): every cached forward is checked against a fresh pass over
+ * the same ids and board rows, and each request is logged (ids, a board-row hash, the cache hit, the top 5). */
+let debug = false;
+let debugTag = '';
+/** Debug: the moves of the prediction being logged (Python rebuilds a cropped game's start position from them). */
+let debugMoves: string[] | null = null;
 let pendingPredict: Extract<ToWorker, { type: 'predict' }> | null = null;
 let predictRunning = false;
 
@@ -68,8 +75,6 @@ async function runStateless(ids: number[], rows?: BoardRow[]): Promise<Float32Ar
   return out.logits.data as Float32Array;
 }
 
-const sameRow = (a: BoardRow | undefined, b: BoardRow | undefined) => a === b || (!!a && !!b && a.every((c, i) => c === b[i]));
-
 /**
  * The KV cache of one token sequence: per layer, keys and values of the cached tokens, token-major
  * ([tokens, heads, head_dim], the export's layout), in buffers that grow by doubling up to max_seq_len. A prefix of
@@ -97,10 +102,7 @@ class KvCache {
   }
   /** Leading tokens (ids and board rows) shared with a sequence. */
   common(ids: number[], rows?: BoardRow[]): number {
-    const n = Math.min(this.ids.length, ids.length);
-    let i = 0;
-    while (i < n && this.ids[i] === ids[i] && sameRow(this.rows[i], rows?.[i])) i++;
-    return i;
+    return sharedPrefix(this.ids, this.rows, ids, rows);
   }
   truncate(n: number) {
     this.ids.length = Math.min(n, this.ids.length);
@@ -209,8 +211,30 @@ function forward(ids: number[], rows?: BoardRow[]): Promise<Float32Array> {
     const keep = Math.min(bestLen, ids.length - 1);
     best.truncate(keep);
     best.used = ++poolTick;
-    return best.extend(ids.slice(keep), rows?.slice(keep));
+    const logits = await best.extend(ids.slice(keep), rows?.slice(keep));
+    if (debug) await debugCheck(ids, rows, logits, keep, pool.indexOf(best));
+    return logits;
   });
+}
+
+const top5 = (l: Float32Array) =>
+  Array.from(l.keys())
+    .sort((a, b) => l[b] - l[a])
+    .slice(0, 5);
+
+/** Debug: the logits of a fresh pass (no cache) over the same ids and rows vs the cached pass. */
+async function debugCheck(ids: number[], rows: BoardRow[] | undefined, cached: Float32Array, hit: number, cache: number) {
+  const check = !debugTag.startsWith('chat') || ids.length % 32 === 0;
+  let diff: number | null = null;
+  let freshTop: number[] | null = null;
+  if (check && hit > 0) {
+    const fresh = await new KvCache(manifest!.kv!, manifest!.max_seq_len).extend(ids, rows);
+    diff = 0;
+    for (let i = 0; i < fresh.length; i++) diff = Math.max(diff, Math.abs(fresh[i] - cached[i]));
+    freshTop = top5(fresh);
+  }
+  const top = top5(cached);
+  post({ type: 'debug', data: { tag: debugTag, n: ids.length, hit, cache, rowsHash: rowsHash(rows), top, freshTop, diff, ids: hit === 0 || debugTag.startsWith('predict') ? ids : undefined, moves: debugTag.startsWith('predict') ? debugMoves : undefined } });
 }
 
 /** Loads onnxruntime from <page root>/ort/. `modelBase` is <root>/chessmind/<model>/, so the root is two levels up. */
@@ -277,7 +301,8 @@ async function fetchModel(base: string, m: ModelManifest): Promise<{ bytes: Uint
   return { bytes, cached: false };
 }
 
-async function load(base: string, backend: Backend, threads = 0) {
+async function load(base: string, backend: Backend, threads = 0, dbg = false) {
+  debug = dbg;
   const t0 = performance.now();
   const getJson = async <T,>(name: string): Promise<T> => {
     const r = await fetch(base + name);
@@ -351,6 +376,8 @@ async function topMoves(moves: string[], top: number, k: number | null): Promise
   if (legal.length === 0) return { moves: [], ms: 0, tokens: 0 };
   const game = gamePrefix(moves, k);
   const { ids, rows } = trimPrefix(game.ids, game.rows, 1);
+  debugTag = `predict ${moves.length} k=${k}`;
+  debugMoves = moves;
   const t0 = performance.now();
   const logits = await forward(ids, rows);
   const ms = performance.now() - t0;
@@ -441,7 +468,9 @@ function sample(logits: Float32Array, allowed: number[], temperature: number, to
  * was active before the think. A tokenizer without <|end_think|> gets exactly the old masks.
  */
 class LineConstraint {
-  private board: Chess | null = null;
+  /** The open line (its board, plies and repetitions). */
+  private line: LineWatch | null = null;
+  private readonly rules: LineRules;
   private readonly t: ChessTokenizer;
   private start: string | undefined;
   /** Side token -> candidate FEN. */
@@ -459,8 +488,9 @@ class LineConstraint {
   /** Right after <|fen|>: the side token chooses the candidate. */
   private pickSide = false;
   private seen = 0;
-  constructor(t: ChessTokenizer, start?: string, positions: string[] = [], think: boolean | null = null, maxThinkTokens: number | null = null) {
+  constructor(t: ChessTokenizer, start?: string, positions: string[] = [], think: boolean | null = null, maxThinkTokens: number | null = null, rules: LineRules = DEFAULT_LINE_RULES) {
     this.t = t;
+    this.rules = rules;
     this.start = start;
     this.endThink = t.endThinkId;
     this.think = this.endThink !== null ? think : false;
@@ -501,16 +531,18 @@ class LineConstraint {
     if (this.inThink && id === this.endThink) {
       this.inThink = false;
       this.start = this.outerStart;
-      this.board = null;
+      this.line = null;
       return;
     }
     if (id === t.fenId && this.positions.size) this.pickSide = true;
-    else if (id === t.lineId) this.board = new Chess(this.start);
-    else if (id === t.endLineId) this.board = null;
-    else if (this.board && t.isMoveId(id)) {
-      const m = t.idToMove(id);
-      this.board.move({ from: m.slice(0, 2), to: m.slice(2, 4), promotion: m[4] });
-    }
+    else if (id === t.lineId) this.line = new LineWatch(this.start);
+    else if (id === t.endLineId) this.line = null;
+    else if (this.line && t.isMoveId(id)) this.line.push(t.idToMove(id));
+  }
+  /** Inside a line with at least one move: the P(<|end_line|>) that ends it (think or answer threshold). */
+  endThreshold(): number | null {
+    if (!this.line || this.line.plies === 0 || this.pickSide || this.forced.length) return null;
+    return this.inThink ? this.rules.endP.think : this.rules.endP.answer;
   }
   allowed(out: number[]): number[] {
     for (let i = this.seen; i < out.length; i++) this.feedOne(out[i], i);
@@ -523,9 +555,11 @@ class LineConstraint {
       return [...this.textMask, t.thinkId];
     }
     const over = this.inThink && this.maxThinkTokens !== null && this.thinkTokens >= this.maxThinkTokens;
-    if (this.board) {
+    if (this.line) {
       if (over) return [t.endLineId];
-      return [...legalUci(this.board).map((m) => t.moveToId(m)), t.endLineId];
+      const max = this.inThink ? this.rules.maxPlies.think : this.rules.maxPlies.answer;
+      if (this.line.plies >= max || (this.rules.stopFinished && this.line.ended())) return [t.endLineId];
+      return [...legalUci(this.line.board).map((m) => t.moveToId(m)), t.endLineId];
     }
     if (this.inThink) return over ? [this.endThink!] : this.thinkTextMask;
     return this.textMask;
@@ -571,6 +605,8 @@ interface GenOptions {
   /** Temperature for the tokens after a generated <|line|> through its <|end_line|> (unset: `temperature`). */
   lineTemperature?: number;
   allowed: (out: number[]) => number[];
+  /** Lines: <|end_line|> is chosen once its probability among the allowed ids reaches `threshold()` (null = off). */
+  endLine?: { id: number; threshold: () => number | null };
   stops: Set<number>;
   render: (out: number[]) => DialoguePart[];
   extra?: Partial<Extract<FromWorker, { type: 'chat-update' }>>;
@@ -614,7 +650,9 @@ async function generate(o: GenOptions) {
     if (step === 0) prefillMs = dt;
     genMs += dt;
     const temperature = inLine && o.lineTemperature !== undefined ? o.lineTemperature : o.temperature;
-    const next = sample(logits, o.allowed(out), temperature, o.topK);
+    const allowed = o.allowed(out);
+    const tau = o.endLine?.threshold() ?? null;
+    const next = tau !== null && probAmong(logits, allowed, o.endLine!.id) >= tau ? o.endLine!.id : sample(logits, allowed, temperature, o.topK);
     out.push(next);
     if (next === lineId) inLine = true;
     else if (next === endLineId) inLine = false;
@@ -639,12 +677,20 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
   // <|eos|> <|user|> ... <|assistant|>: the context every training dialogue has (the packer's separator first)
   const prefix = t.chatPrompt(turns);
   const { start, positions } = dialoguePosition(turns);
+  debugTag = `chat ${req.id}`;
+  debugMoves = null;
   const mode = req.think ?? 'auto';
   const thinking = t.supportsThinking && mode !== 'off';
   // The think fits the context: what the prompt and the answer leave (a quarter of it at least), as chat() in generate.py
   const room = manifest!.max_seq_len - prefix.length - req.maxTokens - 3;
   const maxThink = Math.max(0, Math.min(req.maxThinkTokens ?? DEFAULT_MAX_THINK_TOKENS, Math.max(room, Math.floor((manifest!.max_seq_len - req.maxTokens) / 4))));
-  const constraint = new LineConstraint(t, start, positions, mode === 'on' ? true : mode === 'off' ? false : null, maxThink);
+  const rules: LineRules = {
+    ...DEFAULT_LINE_RULES,
+    ...req.lineRules,
+    endP: { ...DEFAULT_LINE_RULES.endP, ...req.lineRules?.endP },
+    maxPlies: { ...DEFAULT_LINE_RULES.maxPlies, ...req.lineRules?.maxPlies },
+  };
+  const constraint = new LineConstraint(t, start, positions, mode === 'on' ? true : mode === 'off' ? false : null, maxThink, rules);
   const tracker = manifest!.boards ? new BoardTracker(t) : null;
   const endThink = t.endThinkId;
   await generate({
@@ -657,6 +703,7 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
     topK: req.topK,
     lineTemperature: req.lineTemperature ?? DEFAULT_LINE_TEMPERATURE,
     allowed: (out) => constraint.allowed(out),
+    endLine: { id: t.endLineId, threshold: () => constraint.endThreshold() },
     stops: new Set([t.eosId, t.userId]),
     render: (out) => {
       const parts = t.decodeDialogueContent(out);
@@ -708,7 +755,7 @@ ctx.onmessage = (e: MessageEvent<ToWorker>) => {
   const fail = (err: unknown, id?: number) => post({ type: 'error', id, message: err instanceof Error ? err.message : String(err) });
   switch (msg.type) {
     case 'load':
-      load(msg.base, msg.backend, msg.threads ?? 0).catch((err) => fail(err));
+      load(msg.base, msg.backend, msg.threads ?? 0, !!msg.debug).catch((err) => fail(err));
       break;
     case 'predict':
       if (!session) return;

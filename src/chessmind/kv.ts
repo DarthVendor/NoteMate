@@ -38,3 +38,26 @@ export function moveKeys(buf: Float32Array, from: number, to: number, count: num
     }
   }
 }
+
+/**
+ * Leading tokens a cache can reuse: equal ids AND equal board rows (the rows feed the board embedding, so the same ids
+ * with different rows -- a cropped game seeded at another position, a line after a different snapshot -- have
+ * different keys and values).
+ */
+export function sharedPrefix(cachedIds: number[], cachedRows: (number[] | undefined)[], ids: number[], rows?: (number[] | undefined)[]): number {
+  const n = Math.min(cachedIds.length, ids.length);
+  let i = 0;
+  while (i < n && cachedIds[i] === ids[i] && sameRow(cachedRows[i], rows?.[i])) i++;
+  return i;
+}
+
+function sameRow(a: number[] | undefined, b: number[] | undefined): boolean {
+  return a === b || (!!a && !!b && a.length === b.length && a.every((c, i) => c === b[i]));
+}
+
+/** FNV-1a (32-bit) over the codes of board rows: the worker's debug log compares it with Python's BoardTracker rows. */
+export function rowsHash(rows: (number[] | undefined)[] | undefined): string {
+  let h = 0x811c9dc5;
+  for (const r of rows ?? []) for (const c of r ?? []) h = Math.imul(h ^ (c & 0xff), 0x01000193) >>> 0;
+  return h.toString(16).padStart(8, '0');
+}

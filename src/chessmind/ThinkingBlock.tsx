@@ -8,6 +8,7 @@ import { useId, useState } from 'react';
 import { Chess } from 'chess.js';
 import type { ChatLeafPart } from '../types';
 import { DEFAULT_MAX_THINK_TOKENS } from './protocol';
+import { LINE_END_LABEL, lineEnding } from './lineRules';
 import './ThinkingBlock.css';
 
 interface Props {
@@ -50,6 +51,13 @@ function sanLine(fen: string | undefined, moves: string[]): string {
     out.push(broken ? uci : white ? `${no}.${san}` : i === 0 ? `${no}...${san}` : san);
   });
   return out.join(' ');
+}
+
+/** "(draw by repetition)" etc. after a line that stopped in a finished position (mate shows as # in the SAN). */
+export function LineEndNote({ fen, moves }: { fen: string | undefined; moves: string[] }) {
+  const end = lineEnding(fen, moves);
+  if (!end || end === 'checkmate') return null;
+  return <span className="cm-line-end"> ({LINE_END_LABEL[end]})</span>;
 }
 
 const sideOf = (fen: string) => (fen.split(' ')[1] === 'b' ? 'Black' : 'White');
@@ -108,6 +116,7 @@ export function ThinkingBlock({ parts, open, tokens, done, startFen, resolveFen,
             return (
               <p key={i} className="cm-think-line">
                 {p.moves.length ? sanLine(lineFens[i], p.moves) : '(empty line)'}
+                {p.moves.length > 0 && <LineEndNote fen={lineFens[i]} moves={p.moves} />}
               </p>
             );
           })}

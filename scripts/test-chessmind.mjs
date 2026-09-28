@@ -8,7 +8,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { ChessTokenizer } from '../src/chessmind/tokenizer.ts';
 import { BoardTracker, encodeFen, encodeGameWithBoards } from '../src/chessmind/boards.ts';
-import { moveKeys } from '../src/chessmind/kv.ts';
+import { moveKeys, rowsHash, sharedPrefix } from '../src/chessmind/kv.ts';
+import { LineWatch, lineEnding, probAmong } from '../src/chessmind/lineRules.ts';
 
 let kvChecks = 0;
 
@@ -134,5 +135,42 @@ if (existsSync(v4Url)) {
   check('kv moveKeys keeps the sinks', same([...sinkRow], [...rope(0), ...rope(1)]));
   kvChecks = total - before;
 }
-console.log(`${boardChecks} board-code checks, ${v3Checks} tokenizer-v3 checks (${tv.texts.length} texts), ${v4Summary}, ${kvChecks} kv checks; ${total - fail}/${total} passed`);
+// KV-cache reuse is keyed on the ids AND the board rows (kv.ts sharedPrefix): the same ids with other rows are no hit.
+let cacheChecks = 0;
+{
+  const before = total;
+  const a = encodeGameWithBoards(tok, ['e2e4', 'e7e5', 'g1f3', 'b8c6'], 2);
+  const b = encodeGameWithBoards(tok, ['d2d4', 'd7d5', 'g1f3', 'b8c6'], 2);
+  check('kv key: cropped games with equal ids', same(a.ids, b.ids) && !same(a.rows, b.rows));
+  check('kv key: other board rows share nothing', sharedPrefix(a.ids, a.rows, b.ids, b.rows) === 0);
+  check('kv key: same ids and rows share all', sharedPrefix(a.ids, a.rows, a.ids, a.rows.map((r) => [...r])) === a.ids.length);
+  const slid = encodeGameWithBoards(tok, ['e2e4', 'e7e5', 'g1f3', 'b8c6', 'f1b5'], 2);
+  check('kv key: the next ply of a cropped game shares nothing (a new board on <|game|>)', sharedPrefix(a.ids, a.rows, slid.ids, slid.rows) === 0);
+  const full = encodeGameWithBoards(tok, ['e2e4', 'e7e5', 'g1f3'], null);
+  const next = encodeGameWithBoards(tok, ['e2e4', 'e7e5', 'g1f3', 'b8c6'], null);
+  check('kv key: the next ply extends the full game', sharedPrefix(full.ids, full.rows, next.ids, next.rows) === full.ids.length);
+  check('kv key: no rows (text-only models) compare ids', sharedPrefix([1, 2, 3], [], [1, 2, 4]) === 2);
+  // the debug log's row hash equals ChessMind's (FNV-1a over the int8 codes of boards_for_ids)
+  const want = { 'game:opera-game': '0f5892ad', 'game:ep-and-promotion': '8d294e33', 'game:black-ep': 'a7c91f22' };
+  for (const sq of fx.sequences.slice(0, 3)) check(`rows hash ${sq.name}`, rowsHash(new BoardTracker(tok).rows(sq.ids)) === want[sq.name], rowsHash(sq.rows));
+  cacheChecks = total - before;
+}
+// Line rules (lineRules.ts; twin of ChessMind generate.line_end_reason / LineRules): where generated lines stop.
+let lineChecks = 0;
+{
+  const before = total;
+  check('line end: checkmate', lineEnding(undefined, ['f2f3', 'e7e5', 'g2g4', 'd8h4']) === 'checkmate');
+  check('line end: stalemate', lineEnding('k7/8/2Q5/8/8/8/8/K7 w - - 0 1', ['c6b6']) === 'stalemate');
+  check('line end: repetition at the first repeat', lineEnding(undefined, ['g1f3', 'g8f6', 'f3g1', 'f6g8']) === 'repetition' && lineEnding(undefined, ['g1f3', 'g8f6', 'f3g1']) === null);
+  check('line end: insufficient material', lineEnding('k7/8/8/8/8/8/8/Kq6 w - - 0 1', ['a1b1']) === 'insufficient');
+  check('line end: fifty-move rule', lineEnding('k7/8/8/8/8/8/8/KQ6 w - - 99 80', ['b1b2']) === 'fifty-move');
+  check('line end: open line', lineEnding(undefined, ['e2e4', 'e7e5', 'g1f3']) === null);
+  check('line end: illegal move is no ending', lineEnding(undefined, ['e2e5']) === null);
+  const w = new LineWatch();
+  check('line watch counts plies', w.push('e2e4') && w.push('e7e5') && !w.push('e1e3') && w.plies === 2);
+  const p = probAmong([0, Math.log(3), 5, 0], [0, 1, 3], 1);
+  check('probAmong renormalises over the allowed ids', Math.abs(p - 3 / 5) < 1e-9 && probAmong([0, 1], [0], 1) === 0);
+  lineChecks = total - before;
+}
+console.log(`${boardChecks} board-code checks, ${v3Checks} tokenizer-v3 checks (${tv.texts.length} texts), ${v4Summary}, ${kvChecks} kv checks, ${cacheChecks} cache-key checks, ${lineChecks} line-rule checks; ${total - fail}/${total} passed`);
 process.exit(fail ? 1 : 0);

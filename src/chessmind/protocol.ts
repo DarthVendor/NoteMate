@@ -1,4 +1,5 @@
 import type { DialoguePart, DialogueTurn } from './tokenizer';
+import type { LineRules } from './lineRules';
 
 /** Default think budget: tokens of hidden reasoning before <|end_think|> is forced (as chat() in generate.py).
  * Training thinks run from ~50 to ~2,000 tokens; a whole training example fits the 2,560-token context. */
@@ -53,7 +54,7 @@ export interface MovePrediction {
 
 export type ToWorker =
   /** threads: wasm threads (0 / unset = auto: several when the page is cross-origin isolated, else 1). */
-  | { type: 'load'; base: string; backend: Backend; threads?: number }
+  | { type: 'load'; base: string; backend: Backend; threads?: number; debug?: boolean }
   /** contextPlies (board models only): feed <|game|> + the last N moves, the game token carrying the board at the crop. null = full game. */
   | { type: 'predict'; id: number; moves: string[]; top: number; contextPlies: number | null }
   | {
@@ -78,6 +79,8 @@ export type ToWorker =
       think?: ThinkMode;
       /** Most tokens inside <|think|> ... <|end_think|> before the close is forced (default DEFAULT_MAX_THINK_TOKENS). */
       maxThinkTokens?: number;
+      /** Where lines stop (end-line threshold, length cap, finished positions); unset fields: DEFAULT_LINE_RULES. */
+      lineRules?: { endP?: Partial<LineRules['endP']>; maxPlies?: Partial<LineRules['maxPlies']>; stopFinished?: boolean };
     }
   | { type: 'explain'; id: number; moves: string[]; maxTokens: number; temperature: number; topK: number; top: number; contextPlies: number | null }
   | { type: 'stop'; id: number }
@@ -91,4 +94,6 @@ export type FromWorker =
   /** msPerToken: mean of the steps after the first (the first, which reads the prompt, is prefillMs). */
   | { type: 'chat-update'; id: number; parts: DialoguePart[]; tokens: number; msPerToken: number; done: boolean; stopped?: boolean; prefillMs?: number; predictions?: MovePrediction[] }
   | { type: 'picked'; id: number; uci: string | null; p: number; ms: number; tokens: number }
-  | { type: 'error'; id?: number; message: string };
+  | { type: 'error'; id?: number; message: string }
+  /** Debug mode only: one forward pass (see worker debugCheck). */
+  | { type: 'debug'; data: Record<string, unknown> };

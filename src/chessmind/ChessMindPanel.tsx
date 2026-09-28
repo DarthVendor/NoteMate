@@ -8,7 +8,7 @@ import { Chess } from 'chess.js';
 import { ArrowUp, ArrowUpToLine, Bot, Eraser, Pause, Play, Square as StopIcon, X } from 'lucide-react';
 import type { useChessMind } from './useChessMind';
 import { CHAT_MAX_THINK_TOKENS, CHAT_MAX_TOKENS } from './useChessMind';
-import { ThinkingBlock } from './ThinkingBlock';
+import { LineEndNote, ThinkingBlock } from './ThinkingBlock';
 import { isAnalysisRequest, parseCommand } from './commands';
 import { ChessMindSettings } from './ChessMindSettings';
 import { uciToSan } from './san';
@@ -294,6 +294,7 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
             );
           })}
           {moves.length === 0 && <span className="faint">(empty line)</span>}
+          {moves.length > 0 && <LineEndNote fen={startFen} moves={moves} />}
         </div>
         {m.done && moves.length > 0 && usable && (
           <div className="chat-line-actions">
