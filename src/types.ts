@@ -110,6 +110,9 @@ export interface ChatMessage {
   fen?: string;
   /** Moves (UCI, from the start) sent to the model as context. */
   context?: string[];
+  /** User questions: the context part sent after the question (position note, engine or candidates block;
+   * chessmind/promptContext.ts). Not shown as the message text and not re-sent with later questions. */
+  contextText?: string;
   predictions?: { uci: string; p: number }[];
   /** Answer lines already inserted into the tree, by part index. */
   lines?: Record<number, ChatLineState>;

@@ -120,6 +120,13 @@
 .chat-text { margin: 0 0 6px; }
 .chat-text:last-child { margin-bottom: 0; }
 .chat-bubble .cm-think { margin-bottom: 4px; }
+/* Claim checker (chessmind/chatContext.ts): a quiet dotted underline under sentences the board contradicts and under
+ * evaluations made up without an engine result; the reason is the tooltip. */
+.cm-claim { text-decoration: underline dotted; text-decoration-thickness: 1.5px; text-underline-offset: 3px; cursor: help; }
+.cm-claim.is-false { text-decoration-color: color-mix(in srgb, var(--warning) 75%, transparent); }
+.cm-claim.is-eval { text-decoration-color: color-mix(in srgb, var(--text-3) 90%, transparent); }
+.cm-claim.is-false.is-eval { text-decoration-color: color-mix(in srgb, var(--warning) 75%, transparent); }
+.chat-context { cursor: help; }
 
 .chat-line { margin: 4px 0 8px; padding: 6px 7px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); }
 .chat-line:last-child { margin-bottom: 0; }

@@ -3,7 +3,7 @@
  * reasoning as a collapsed ThinkingBlock, suggestions for an empty chat, and a composer with a "/" command menu.
  * Model settings live in a popover (ChessMindSettings); move predictions are PredictionChips (shown by the host).
  */
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Chess } from 'chess.js';
 import { ArrowUp, ArrowUpToLine, Bot, Eraser, Pause, Play, Square as StopIcon, X } from 'lucide-react';
 import type { useChessMind } from './useChessMind';
@@ -20,6 +20,9 @@ import { positionAt, resolveLine } from '../state/gameReducer';
 import { newId } from '../state/pgn';
 import { ROOT_ID, type ChatLinePart, type ChatLineState, type ChatMessage, type GameState } from '../types';
 import { ProgressBar } from '../ui/primitives';
+import { AppContext } from '../app/AppContext';
+import { MIN_ENGINE_DEPTH, chatContext, contextLabel, engineInfoFor, messageMarks, type MessageMarks } from './chatContext';
+import { MarkedText } from './MarkedText';
 
 type ChessMindState = ReturnType<typeof useChessMind>;
 
@@ -39,6 +42,9 @@ interface Props {
 const mb = (bytes: number) => (bytes / 1e6).toFixed(0);
 
 const PLAY_STEP_MS = 800;
+
+/** Claim checker marks by answer message object (a patch replaces only the patched message). */
+const MARK_CACHE = new WeakMap<ChatMessage, { user?: ChatMessage; mk: MessageMarks }>();
 
 /** Starters shown in an empty chat. */
 const SUGGESTIONS = ["What's the plan here?", 'What should I play?', 'Show me the Najdorf', 'Review this game'];
@@ -75,6 +81,21 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const model = models?.find((m) => m.id === modelId) ?? models?.[0];
   const lastAnswer = [...chat].reverse().find((m) => m.role === 'assistant' && m.msPerToken);
+  // The analysis engine (when the panel is inside the app): its result goes with questions about its position.
+  const engine = useContext(AppContext)?.engine;
+  // Claim checker marks per finished answer (cached per message object: patches replace only the patched message).
+  const marks = useMemo(() => {
+    const out = new Map<string, MessageMarks>();
+    if (!settings.checkClaims) return out;
+    chat.forEach((m, i) => {
+      if (m.role !== 'assistant' || m.kind !== 'model' || !m.done || !m.parts.length) return;
+      const user = chat.slice(0, i).reverse().find((u) => u.role === 'user' && u.kind === 'model');
+      let hit = MARK_CACHE.get(m);
+      if (!hit || hit.user !== user) MARK_CACHE.set(m, (hit = { user, mk: messageMarks(m, user) }));
+      if (hit.mk.count) out.set(m.id, hit.mk);
+    });
+    return out;
+  }, [state.chat, settings.checkClaims]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep the newest message in view.
   const lastParts = chat.length ? JSON.stringify(chat[chat.length - 1].parts).length : 0;
@@ -240,7 +261,21 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
     const context = !fenOpt && settings.sendMoves && uciMoves && uciMoves.length ? uciMoves : undefined;
     // With a snapshot, the moves are not in the prompt but an answer may still rewind to a position along them
     const gameMoves = fenOpt && uciMoves && uciMoves.length ? uciMoves : undefined;
-    cm.ask(text, { originId: state.currentId, fen: fenOpt, context, gameMoves });
+    // The position under discussion (the snapshot or the end of the sent line; the initial position with no moves
+    // yet) goes with its move number, the engine's result for it, or else the model's own top moves.
+    const discussed = fenOpt || context || uciMoves?.length === 0 ? fen : null;
+    const pred = cm.prediction && uciMoves && cm.prediction.key.split('|')[0] === uciMoves.join(' ') ? cm.prediction.moves : null;
+    const minDepth = engine?.settings.depth ? Math.min(MIN_ENGINE_DEPTH, engine.settings.depth) : MIN_ENGINE_DEPTH;
+    const contextText = discussed
+      ? chatContext({
+          fen: discussed,
+          engine: engine?.status === 'ready' ? engineInfoFor(discussed, { fen: engine.linesFen, lines: engine.lines, name: engine.engineName }, minDepth) : null,
+          candidates: pred,
+          sendEngine: settings.engineContext,
+          sendCandidates: settings.candidatesContext,
+        })
+      : '';
+    cm.ask(text, { originId: state.currentId, fen: fenOpt, context, gameMoves, contextText });
   };
 
   // "/" menu entries matching what follows the slash.
@@ -361,7 +396,18 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
     }
     // Hidden reasoning (first part) renders as a collapsible block; only the answer parts drive the board.
     const think = m.parts[0]?.kind === 'think' ? m.parts[0] : null;
-    const thinkBlock = think && <ThinkingBlock parts={think.parts} open={think.open} tokens={think.tokens} done={m.done} startFen={m.fen} resolveFen={(f) => snapshotFen(m, f)} />;
+    const thinkMarks = marks.get(m.id)?.think;
+    const thinkBlock = think && (
+      <ThinkingBlock
+        parts={think.parts}
+        open={think.open}
+        tokens={think.tokens}
+        done={m.done}
+        startFen={m.fen}
+        resolveFen={(f) => snapshotFen(m, f)}
+        renderText={thinkMarks?.size ? (t, i) => (thinkMarks.get(i) ? <MarkedText segments={thinkMarks.get(i)!} /> : t) : undefined}
+      />
+    );
     if (m.parts.length === (think ? 1 : 0)) {
       if (think?.open && !m.done) return thinkBlock;
       return (
@@ -378,8 +424,12 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
       if (run.length) blocks.push(<p key={key} className="chat-text">{run}</p>);
       run = [];
     };
+    const mk = marks.get(m.id);
     m.parts.forEach((p, i) => {
-      if (p.kind === 'text') run.push(<span key={i}>{p.text} </span>);
+      if (p.kind === 'text') {
+        const segs = mk?.answer.get(i);
+        run.push(<span key={i}>{segs ? <MarkedText segments={segs} /> : p.text} </span>);
+      }
       else if (p.kind === 'line') {
         flush(`t${i}`);
         blocks.push(renderLine(m, i, p));
@@ -417,7 +467,17 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
       rows.push(
         <div key={m.id} className="chat-msg chat-user">
           <div className="chat-bubble">{text}</div>
-          {(m.fen || m.context?.length) && <div className="chat-meta">{m.fen ? 'about this position' : `with the game so far · ${m.context!.length} plies`}</div>}
+          {(m.fen || m.context?.length || m.contextText) && (
+            <div className="chat-meta">
+              {m.fen ? 'about this position' : m.context?.length ? `with the game so far · ${m.context.length} plies` : ''}
+              {contextLabel(m.contextText) && (
+                <span className="chat-context" title={`Sent with the question:\n${m.contextText}`} data-testid="chessmind-context-sent">
+                  {m.fen || m.context?.length ? ' · ' : ''}
+                  {contextLabel(m.contextText)} sent
+                </span>
+              )}
+            </div>
+          )}
         </div>,
       );
     } else {

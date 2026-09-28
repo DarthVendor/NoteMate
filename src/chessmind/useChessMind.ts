@@ -41,6 +41,12 @@ export interface ChessMindSettings {
   /** Hard cap on plies per move line (the model can end earlier). */
   maxLinePliesAnswer: number;
   maxLinePliesThink: number;
+  /** Send the analysis engine's result for the position under discussion with a question (promptContext.ts). */
+  engineContext: boolean;
+  /** Without an engine result: send the model's own top moves (the prediction chips) as candidates. */
+  candidatesContext: boolean;
+  /** Mark answer sentences whose board facts are false (claims.ts), and evaluations made up without an engine. */
+  checkClaims: boolean;
 }
 
 export interface PickResult {
@@ -57,7 +63,7 @@ const STORAGE_KEY = 'notemate.chessmind.v1';
 const SETTINGS_VERSION = 2;
 /** Plies of history the simulator gives a board-embedding model (see pick). */
 const SIM_CONTEXT_PLIES = 16;
-const DEFAULTS: ChessMindSettings = { enabled: false, modelId: '', backend: 'auto', arrows: true, aboutPosition: false, sendMoves: true, contextPlies: 'full', think: 'auto', temperature: 0.8, lineEndAnswer: DEFAULT_LINE_RULES.endP.answer, lineEndThink: DEFAULT_LINE_RULES.endP.think, maxLinePliesAnswer: DEFAULT_LINE_RULES.maxPlies.answer, maxLinePliesThink: DEFAULT_LINE_RULES.maxPlies.think };
+const DEFAULTS: ChessMindSettings = { enabled: false, modelId: '', backend: 'auto', arrows: true, aboutPosition: false, sendMoves: true, contextPlies: 'full', think: 'auto', temperature: 0.8, lineEndAnswer: DEFAULT_LINE_RULES.endP.answer, lineEndThink: DEFAULT_LINE_RULES.endP.think, maxLinePliesAnswer: DEFAULT_LINE_RULES.maxPlies.answer, maxLinePliesThink: DEFAULT_LINE_RULES.maxPlies.think, engineContext: true, candidatesContext: true, checkClaims: true };
 /** Earlier chat turns (user + assistant messages) sent with a question, so follow-ups like "no, the other one"
  * have their context. The KV cache makes the extra prompt a one-off prefill; the worker trims the think budget
  * (and drops the oldest turns) to fit the context. */
@@ -265,7 +271,7 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
 
   /** Send a question to the model; the answer streams into a new assistant message. */
   const ask = useCallback(
-    (prompt: string, opts: { originId: string; fen?: string; context?: string[]; gameMoves?: string[] }) => {
+    (prompt: string, opts: { originId: string; fen?: string; context?: string[]; gameMoves?: string[]; contextText?: string }) => {
       const worker = workerRef.current;
       const text = prompt.trim();
       if (!worker || status !== 'ready' || chatId.current !== null || !text) return;
@@ -285,11 +291,11 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
       dispatch({
         type: 'CHAT_APPEND',
         messages: [
-          { id: newId(), role: 'user', kind: 'model', parts: [{ kind: 'text', text }], originId: opts.originId, fen: opts.fen, context: opts.context },
+          { id: newId(), role: 'user', kind: 'model', parts: [{ kind: 'text', text }], originId: opts.originId, fen: opts.fen, context: opts.context, ...(opts.contextText ? { contextText: opts.contextText } : {}) },
           { id: answerId, role: 'assistant', kind: 'model', parts: [], originId: opts.originId, fen: opts.fen },
         ],
       });
-      worker.postMessage({ type: 'chat', id, history, prompt: text, fen: opts.fen, context: opts.context, gameMoves: opts.gameMoves, maxTokens: CHAT_MAX_TOKENS, temperature: settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: settings.think, maxThinkTokens: CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } } } satisfies ToWorker);
+      worker.postMessage({ type: 'chat', id, history, prompt: text, fen: opts.fen, context: opts.context, gameMoves: opts.gameMoves, contextText: opts.contextText || undefined, maxTokens: CHAT_MAX_TOKENS, temperature: settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: settings.think, maxThinkTokens: CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } } } satisfies ToWorker);
     },
     [chat, status, dispatch, settings.think, settings.temperature, settings.lineEndAnswer, settings.lineEndThink, settings.maxLinePliesAnswer, settings.maxLinePliesThink],
   );

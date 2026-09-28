@@ -646,6 +646,7 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
   if (req.fen) userParts.push({ kind: 'fen', fen: req.fen });
   userParts.push({ kind: 'text', text: req.prompt });
   if (req.context?.length) userParts.push({ kind: 'line', moves: req.context });
+  if (req.contextText) userParts.push({ kind: 'text', text: req.contextText });
   // Earlier turns take at most half the context (the rest is for the think and the answer): oldest exchanges go first
   const history = [...req.history];
   let turns: DialogueTurn[] = [...history, { role: 'user', parts: userParts }];

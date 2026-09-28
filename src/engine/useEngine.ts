@@ -26,6 +26,8 @@ export function useEngine(fen: string, paused = false) {
   const [engineName, setEngineName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [lines, setLines] = useState<EngineLine[]>([]);
+  /** The position `lines` belong to (set when its search starts; null while nothing is analysed). */
+  const [linesFen, setLinesFen] = useState<string | null>(null);
   const clientRef = useRef<EngineClient | null>(null);
   const activeSearch = useRef(0);
   const [available, setAvailable] = useState<Record<string, EngineAvailability> | null>(null);
@@ -128,14 +130,16 @@ export function useEngine(fen: string, paused = false) {
     if (paused) {
       client.stop();
       setLines([]);
+      setLinesFen(null);
       return;
     }
     const timer = setTimeout(() => {
       setLines([]);
+      setLinesFen(fen);
       activeSearch.current = client.analyse(fen, settings.depth);
     }, 120);
     return () => clearTimeout(timer);
   }, [fen, status, paused, settings.threads, settings.hashMb, settings.multiPv, settings.depth]);
 
-  return { settings, update, status, engineName, error, lines, available, progress, paused };
+  return { settings, update, status, engineName, error, lines, linesFen, available, progress, paused };
 }

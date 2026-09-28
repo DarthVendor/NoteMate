@@ -116,6 +116,27 @@ export function ChessMindSettings({ cm }: { cm: ChessMindState }) {
             </span>
             <input type="checkbox" checked={settings.aboutPosition} onChange={(e) => update({ aboutPosition: e.target.checked })} data-testid="chessmind-about-position" />
           </label>
+          <label className="check-row">
+            <span className="check-text">
+              <span>Send engine result to ChessMind</span>
+              <span className="field-hint">With each question: the move number and, when the analysis engine has searched this position, its evaluation, best move and line. The model quotes these instead of inventing them.</span>
+            </span>
+            <input type="checkbox" checked={settings.engineContext} onChange={(e) => update({ engineContext: e.target.checked })} data-testid="chessmind-engine-context" />
+          </label>
+          <label className="check-row">
+            <span className="check-text">
+              <span>Send the model's top moves</span>
+              <span className="field-hint">Without an engine result: the prediction chips go along as candidates, so the recommended move matches them.</span>
+            </span>
+            <input type="checkbox" checked={settings.candidatesContext} onChange={(e) => update({ candidatesContext: e.target.checked })} data-testid="chessmind-candidates-context" />
+          </label>
+          <label className="check-row">
+            <span className="check-text">
+              <span>Check answers against the board</span>
+              <span className="field-hint">Underlines sentences whose facts (material, pawn structure, pieces, checks, open files…) the board contradicts, and evaluations given without an engine result.</span>
+            </span>
+            <input type="checkbox" checked={settings.checkClaims} onChange={(e) => update({ checkClaims: e.target.checked })} data-testid="chessmind-check-claims" />
+          </label>
           <MenuDivider />
           <MenuLabel>Predictions</MenuLabel>
           <label className="check-row">

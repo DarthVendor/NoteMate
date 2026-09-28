@@ -26,6 +26,8 @@ interface Props {
   resolveFen?: (fen: string) => string;
   /** The think budget, shown with the live token count while it streams. */
   budget?: number;
+  /** Renders text part `i` (e.g. with the claim checker's marks); default: the plain text. */
+  renderText?: (text: string, i: number) => React.ReactNode;
 }
 
 /** SAN of a UCI line from `fen`, with move numbers ("4...d5 5.exd5 Nxd5"); unparsable moves stay UCI. */
@@ -63,7 +65,7 @@ export function LineEndNote({ fen, moves }: { fen: string | undefined; moves: st
 
 const sideOf = (fen: string) => (fen.split(' ')[1] === 'b' ? 'Black' : 'White');
 
-export function ThinkingBlock({ parts, open, tokens, done, startFen, resolveFen, budget = DEFAULT_MAX_THINK_TOKENS }: Props) {
+export function ThinkingBlock({ parts, open, tokens, done, startFen, resolveFen, budget = DEFAULT_MAX_THINK_TOKENS, renderText }: Props) {
   const [expanded, setExpanded] = useState(false);
   const bodyId = useId();
   const streaming = !!open && !done;
@@ -112,7 +114,7 @@ export function ThinkingBlock({ parts, open, tokens, done, startFen, resolveFen,
       {expanded && canExpand && (
         <div className="cm-think-body" id={bodyId}>
           {parts.map((p, i) => {
-            if (p.kind === 'text') return <p key={i} className="cm-think-text">{p.text}</p>;
+            if (p.kind === 'text') return <p key={i} className="cm-think-text">{renderText ? renderText(p.text, i) : p.text}</p>;
             if (p.kind === 'fen') return <p key={i} className="cm-think-fen">position · {sideOf(p.fen)} to move</p>;
             return (
               <p key={i} className="cm-think-line">
