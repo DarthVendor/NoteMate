@@ -20,7 +20,7 @@ import type { GameAction } from '../state/gameReducer';
 import { positionAt, resolveLine } from '../state/gameReducer';
 import { newId } from '../state/pgn';
 import { ROOT_ID, type ChatLinePart, type ChatLineState, type ChatMessage, type GameState } from '../types';
-import { ProgressBar } from '../ui/primitives';
+import { ProgressBar, Segmented } from '../ui/primitives';
 import { AppContext } from '../app/AppContext';
 import { MIN_ENGINE_DEPTH, chatContext, contextLabel, engineInfoFor, messageMarks, type MessageMarks } from './chatContext';
 import { MarkedText } from './MarkedText';
@@ -613,6 +613,21 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
                     <span>{c.desc}</span>
                   </button>
                 ))}
+              </div>
+            )}
+            {info?.thinking && (
+              <div className="chat-think-toggle" title="Hidden reasoning before the answer: off, the model decides, or always">
+                <span className="chat-think-label">Think</span>
+                <Segmented
+                  label="Think mode"
+                  value={settings.think}
+                  onChange={(v) => update({ think: v })}
+                  options={[
+                    { value: 'off', label: 'Off' },
+                    { value: 'auto', label: 'Auto' },
+                    { value: 'on', label: 'On' },
+                  ]}
+                />
               </div>
             )}
             <div className="chat-input">

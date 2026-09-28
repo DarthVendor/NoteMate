@@ -189,6 +189,9 @@
 .chat-empty-hint kbd { height: 16px; min-width: 16px; }
 
 .chat-composer { flex: none; position: relative; padding: 8px 10px 10px; border-top: 1px solid var(--divider); }
+.chat-think-toggle { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-bottom: 5px; }
+.chat-think-label { font-size: var(--fs-sm); color: var(--text-3); }
+.chat-think-toggle .segmented button { height: 22px; padding: 0 9px; font-size: var(--fs-sm); }
 .chat-input {
   display: flex; align-items: flex-end; gap: 6px;
   padding: 4px 4px 4px 11px;
