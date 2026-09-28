@@ -31,6 +31,9 @@ export interface ModelManifest {
   n_head: number;
   max_seq_len: number;
   boards: boolean;
+  /** v6 board rows (ChessMind docs/board-embedding.md): absent = the legacy tracker and 68 slots. */
+  board_sync?: 'legacy' | 'pod';
+  board_features?: string[];
   /** Trained on per-side game instances: game prompts start `<|bos|> <|game|> <side to move>`. */
   perspective_games?: boolean;
   /** Text tokenizer format (2 = GPT-2 split; 3 = chess-notation split + prefix space; 4 = 3 + <|end_think|>). */

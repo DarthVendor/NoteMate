@@ -10,7 +10,7 @@
  */
 import { Chess } from 'chess.js';
 import { ChessTokenizer, type DialoguePart, type DialogueTurn } from './tokenizer';
-import { BoardTracker, encodeGameWithBoards, N_SLOTS, type BoardRow } from './boards';
+import { BoardTracker, encodeGameWithBoards, nSlots, type BoardRow, type BoardSync } from './boards';
 import { KV_SINKS, moveKeys, rowsHash, sharedPrefix } from './kv';
 import { DEFAULT_LINE_RULES, probAmong, type LineRules } from './lineRules';
 import { dialoguePosition, rewindCandidates } from './snapshots';
@@ -64,11 +64,17 @@ function idsTensor(ids: number[]): OrtTensor {
   return new ort!.Tensor('int64', BigInt64Array.from(ids, (i) => BigInt(i)), [1, ids.length]);
 }
 
+/** The model's board-row options (v6 sync / feature planes; legacy without them). */
+function boardOpts(): { sync: BoardSync; features: string[] } {
+  return { sync: manifest?.board_sync ?? 'legacy', features: manifest?.board_features ?? [] };
+}
+
 function boardsTensor(rows: (BoardRow | undefined)[] | undefined, n: number): OrtTensor {
   if (!rows || rows.length !== n || rows.some((r) => !r)) throw new Error('board rows missing for a board-embedding model');
-  const flat = new BigInt64Array(n * N_SLOTS);
-  rows.forEach((r, i) => r!.forEach((c, j) => (flat[i * N_SLOTS + j] = BigInt(c))));
-  return new ort!.Tensor('int64', flat, [1, n, N_SLOTS]);
+  const width = nSlots(boardOpts().features);
+  const flat = new BigInt64Array(n * width);
+  rows.forEach((r, i) => r!.forEach((c, j) => (flat[i * width + j] = BigInt(c))));
+  return new ort!.Tensor('int64', flat, [1, n, width]);
 }
 
 /** Stateless graph: logits of the last position of the whole sequence. */
@@ -343,7 +349,7 @@ async function load(base: string, backend: Backend, threads = 0, dbg = false) {
   if (!session) throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
   // Warm-up runs (the first run allocates / compiles kernels): a prefill and, with a cache, a decode step on top.
   const warm = [tok.gameId, tok.moveToId('e2e4')];
-  const warmRows = new BoardTracker(tok).rows(warm);
+  const warmRows = new BoardTracker(tok, undefined, boardOpts()).rows(warm);
   await forward(warm.slice(0, 1), warmRows.slice(0, 1));
   if (manifest.kv_cache) await forward(warm, warmRows);
   pool = [];
@@ -368,7 +374,7 @@ function trimPrefix(ids: number[], rows: BoardRow[] | undefined, reserve: number
  */
 function gamePrefix(moves: string[], k: number | null): { ids: number[]; rows?: BoardRow[] } {
   const perspective = manifest!.perspective_games ? ChessTokenizer.sideToMove(moves.length) : undefined;
-  if (manifest!.boards) return encodeGameWithBoards(tok!, moves, k, perspective);
+  if (manifest!.boards) return encodeGameWithBoards(tok!, moves, k, perspective, boardOpts());
   return { ids: tok!.encodeGame(moves, undefined, perspective) };
 }
 
@@ -474,7 +480,7 @@ async function thinkPick(req: Extract<ToWorker, { type: 'pick' }>): Promise<bool
   // Board rows of the generated tokens: a legacy tracker primed with the whole game (its state is the game position).
   let tracker: BoardTracker | null = null;
   if (game.rows) {
-    tracker = new BoardTracker(t);
+    tracker = new BoardTracker(t, undefined, boardOpts());
     tracker.rows(t.encodeGame(req.moves, undefined, manifest!.perspective_games ? ChessTokenizer.sideToMove(req.moves.length) : undefined));
   }
   const textT = req.thinkTemperature ?? DEFAULT_THINK_MOVE_TEMPERATURE;
@@ -706,7 +712,7 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
         return fit.ids;
       }
     : undefined;
-  const tracker = manifest!.boards ? new BoardTracker(t) : null;
+  const tracker = manifest!.boards ? new BoardTracker(t, undefined, boardOpts()) : null;
   const endThink = t.endThinkId;
   await generate({
     id: req.id,
