@@ -1,7 +1,8 @@
 /*
  * The tools ChessMind may call in NoteMate (tools.ts), run on the main thread: the engine tool searches the position
  * with a dedicated Stockfish (the configured build, else the single-threaded Lite build; never the analysis engine,
- * whose search follows the board) and answers with the `[Engine: ...]` block of promptContext.ts.
+ * whose search follows the board) and answers with the `[Engine: ...]` block of promptContext.ts; the notes tools read
+ * the user's notes on the current game tree (notesTool.ts).
  */
 import { useCallback, useEffect, useRef } from 'react';
 import { Chess } from 'chess.js';
@@ -9,6 +10,8 @@ import { EngineClient } from '../engine/EngineClient';
 import { resolveEngineSource, type EngineAvailability, type EngineSettings } from '../engine/engines';
 import { engineInfoFor } from './chatContext';
 import { engineToolResult, errorText, gameOverText, type ToolResultData } from './tools';
+import { runNotesTool } from './notesTool';
+import type { GameState } from '../types';
 
 /** Search limits of one engine call: whichever comes first. */
 export const TOOL_ENGINE_DEPTH = 16;
@@ -39,11 +42,11 @@ export function finishedResult(fen: string): ToolResultData | null {
   return null;
 }
 
-export function useChessMindTools(engineSettings: EngineSettings, engineAvailable: Record<string, EngineAvailability> | null): RunTool {
-  const latest = useRef({ engineSettings, engineAvailable });
+export function useChessMindTools(engineSettings: EngineSettings, engineAvailable: Record<string, EngineAvailability> | null, game: GameState | null = null): RunTool {
+  const latest = useRef({ engineSettings, engineAvailable, game });
   useEffect(() => {
-    latest.current = { engineSettings, engineAvailable };
-  }, [engineSettings, engineAvailable]);
+    latest.current = { engineSettings, engineAvailable, game };
+  }, [engineSettings, engineAvailable, game]);
   const client = useRef<{ key: string; ready: Promise<EngineClient> } | null>(null);
   // one call at a time on the tool engine
   const chain = useRef<Promise<unknown>>(Promise.resolve());
@@ -94,6 +97,8 @@ export function useChessMindTools(engineSettings: EngineSettings, engineAvailabl
 
   return useCallback<RunTool>(
     (req) => {
+      // Notes are local and instant: no queue behind engine searches
+      if (req.name === 'notes' || req.name === 'all_notes') return Promise.resolve(runNotesTool(latest.current.game, req.name, req.fen));
       const job = chain.current.then(async (): Promise<ToolResultData> => {
         if (req.name !== 'engine') return { text: errorText(req.name ? req.name[0].toUpperCase() + req.name.slice(1) : 'Tool', 'unknown tool'), ok: false };
         const done = finishedResult(req.fen);

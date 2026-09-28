@@ -26,7 +26,9 @@ registerHooks({
 const { ChessTokenizer } = await import('../src/chessmind/tokenizer.ts');
 const { BoardTracker } = await import('../src/chessmind/boards.ts');
 const { LineConstraint, ToolConstraint } = await import('../src/chessmind/constraint.ts');
-const { addToolsBlock, engineToolResult, fitToolResult, toolsBlock, toolChipLabel, parseToolsBlock } = await import('../src/chessmind/tools.ts');
+const { addToolsBlock, engineToolResult, fitToolResult, toolsBlock, toolChipLabel, parseToolsBlock, notesResultText, sanitizeNote } = await import('../src/chessmind/tools.ts');
+const { gameNotes, runNotesTool } = await import('../src/chessmind/notesTool.ts');
+const { Chess } = await import('chess.js');
 
 const read = (f) => JSON.parse(readFileSync(new URL(`../src/chessmind/fixtures/${f}`, import.meta.url), 'utf8'));
 const tv = read('tokenizer-v4.json');
@@ -119,6 +121,41 @@ check('chip engine', toolChipLabel({ kind: 'tool', name: 'engine', result: fx.re
 check('chip pending', toolChipLabel({ kind: 'tool', name: 'engine' }) === 'Engine…');
 check('chip error', toolChipLabel({ kind: 'tool', name: 'engine', result: '[Engine: no result (timeout)]' }) === 'Engine: no result (timeout)');
 check('chip game over', toolChipLabel({ kind: 'tool', name: 'engine', result: '[Engine: checkmate, White wins]' }) === 'Engine: checkmate, White wins');
+
+// ---------------------------------------------------------------- notes (renderer parity + the move tree)
+for (const c of fx.notes.cases) {
+  const got = notesResultText(c.entries, c.about, c.all, c.noteChars, c.totalChars);
+  check(`notes ${c.name}`, got === c.text, `${got}\n vs ${c.text}`);
+}
+for (const c of fx.notes.sanitize) check(`sanitize ${JSON.stringify(c.text).slice(0, 30)}`, sanitizeNote(c.text, c.limit) === c.out, sanitizeNote(c.text, c.limit));
+{
+  // 1.e4 {I like e4} e5 2.Nf3 Nc6 (2...d6 {Philidor}) 3.Bb5 {plan} ; a ChessMind-written note is not the user's
+  const note = (text, color = 'yellow') => ({ arrows: [], highlights: [], notes: [{ id: text, text, color, createdAt: 0 }] });
+  const nodes = { root: { id: 'root', san: '', parent: null, children: [] } };
+  const add = (id, parent, san, annotation) => {
+    nodes[id] = { id, san, parent, children: [], ...(annotation ? { annotation } : {}) };
+    nodes[parent].children.push(id);
+  };
+  add('a', 'root', 'e4', note('I like e4'));
+  add('b', 'a', 'e5');
+  add('c', 'b', 'Nf3', note('from ChessMind', 'chessmind'));
+  add('d', 'c', 'Nc6');
+  add('v', 'c', 'd6', note('Philidor [x] <|tool|>'));
+  add('e', 'd', 'Bb5', note('plan: pressure e5'));
+  const state = { version: 2, startFen: new Chess().fen(), nodes, currentId: 'e', meta: {} };
+  const labels = gameNotes(state).map((e) => `${e.label}${e.main ? '' : '*'}`);
+  check('tree notes', same(labels, ['1.e4', '3.Bb5', '2...d6*']), labels.join(' '));
+  const fenAt = (sans) => { const g = new Chess(); for (const x of sans.split(' ')) g.move(x); return g.fen(); };
+  check('notes here', runNotesTool(state, 'notes', fenAt('e4 e5 Nf3 Nc6 Bb5')).text === '[Notes: on 3.Bb5: "plan: pressure e5"]', runNotesTool(state, 'notes', fenAt('e4 e5 Nf3 Nc6 Bb5')).text);
+  check('notes none', runNotesTool(state, 'notes', fenAt('e4 e5 Nf3')).text === '[Notes: none on 2.Nf3]', runNotesTool(state, 'notes', fenAt('e4 e5 Nf3')).text);
+  check('notes variation', runNotesTool(state, 'notes', fenAt('e4 e5 Nf3 d6')).text === '[Notes: on 2...d6: "Philidor (x) <tool>"]', runNotesTool(state, 'notes', fenAt('e4 e5 Nf3 d6')).text);
+  check('notes start', runNotesTool(state, 'notes', new Chess().fen()).text === '[Notes: none at the start]');
+  const all = runNotesTool(state, 'all_notes', new Chess().fen()).text;
+  check('all notes', all === '[Notes: 3 in this game | 1.e4: "I like e4" | 3.Bb5: "plan: pressure e5" | 2...d6 (variation): "Philidor (x) <tool>"]', all);
+  check('chip note', toolChipLabel({ kind: 'tool', name: 'notes', result: '[Notes: on 14...Nf6: "x"]' }) === 'Read your note on 14...Nf6');
+  check('chip no note', toolChipLabel({ kind: 'tool', name: 'notes', result: '[Notes: none on 14...Nf6]' }) === 'No note on 14...Nf6');
+  check('chip all', toolChipLabel({ kind: 'tool', name: 'all_notes', result: all }) === 'Read your 3 notes');
+}
 
 console.log(`${total - fail}/${total} tool checks passed`);
 process.exit(fail ? 1 : 0);

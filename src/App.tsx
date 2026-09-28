@@ -55,7 +55,7 @@ export default function App() {
   const standardStart = state.startFen.split(' ').slice(0, 4).join(' ') === DEFAULT_POSITION.split(' ').slice(0, 4).join(' ');
   const uciMoves = useMemo(() => (standardStart ? chess.history({ verbose: true }).map((m) => m.lan) : null), [chess, standardStart]);
   // Tools ChessMind may call (tool calling): a dedicated engine, separate from the analysis engine
-  const chessmindTools = useChessMindTools(engine.settings, engine.available);
+  const chessmindTools = useChessMindTools(engine.settings, engine.available, state);
   const chessmind = useChessMind(uciMoves, state.chat ?? [], dispatch, chessmindTools);
   const sim = useSimulate({ state, dispatch, cm: chessmind, engineSettings: engine.settings, engineAvailable: engine.available });
   useEffect(() => setSimActive(sim.phase === 'loading' || sim.phase === 'running' || sim.phase === 'paused'), [sim.phase]);

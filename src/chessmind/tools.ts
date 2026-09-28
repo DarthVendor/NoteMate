@@ -24,7 +24,64 @@ export const DEFAULT_TOOL_TIMEOUT_MS = 12000;
 /** The tools NoteMate can run: result title, and whether a call may carry a line. */
 export const TOOL_SPECS: Record<string, { title: string; takesLine: boolean; label: string }> = {
   engine: { title: 'Engine', takesLine: true, label: 'Engine' },
+  notes: { title: 'Notes', takesLine: true, label: 'Notes' },
+  all_notes: { title: 'Notes', takesLine: false, label: 'Notes' },
 };
+/** What NoteMate offers when tools are on (the order of the `[Tools: ...]` block). */
+export const OFFERED_TOOLS = ['engine', 'notes', 'all_notes'];
+
+// ---------------------------------------------------------------------------------------------- notes results
+/** Characters per note in a result, and per `all_notes` result (the compact fallbacks halve them), as in Python. */
+export const NOTE_CHARS = 240;
+export const NOTES_CHARS = 600;
+
+export interface NoteEntry {
+  /** The move the note is on (`14...Nf6`), or `the start`. */
+  label: string;
+  texts: string[];
+  main: boolean;
+}
+
+/** Note text as inert data inside a result block (tools.sanitize_note): one line, no special-token-like markup, no
+ * brackets or field bars, at most `limit` characters. */
+export function sanitizeNote(text: string, limit = NOTE_CHARS): string {
+  let t = text.split(/\s+/).filter(Boolean).join(' ');
+  t = t.replaceAll('<|', '<').replaceAll('|>', '>').replaceAll('|', '/').replaceAll('[', '(').replaceAll(']', ')').replaceAll('"', "'");
+  if (t.length > limit) t = t.slice(0, Math.max(1, limit - 3)).trimEnd() + '...';
+  return t;
+}
+
+const quoted = (texts: string[], limit: number) =>
+  texts
+    .filter((t) => t.trim())
+    .map((t) => `"${sanitizeNote(t, limit)}"`)
+    .join('; ');
+
+/** The notes tools' result block (tools.notes_result_text): `notes` about one move (`about` null = the start) or
+ * `all_notes` (main line first, entries past `totalChars` become `+K more`). */
+export function notesResultText(entries: NoteEntry[], about: string | null, allNotes = false, noteChars = NOTE_CHARS, totalChars = NOTES_CHARS): string {
+  if (!allNotes) {
+    const texts = entries.flatMap((e) => e.texts).filter((t) => t.trim());
+    if (about === null) return texts.length ? `[Notes: at the start: ${quoted(texts, noteChars)}]` : '[Notes: none at the start]';
+    return texts.length ? `[Notes: on ${about}: ${quoted(texts, noteChars)}]` : `[Notes: none on ${about}]`;
+  }
+  const live = entries.filter((e) => e.texts.some((t) => t.trim()));
+  if (!live.length) return '[Notes: none in this game]';
+  const ordered = [...live.filter((e) => e.main), ...live.filter((e) => !e.main)];
+  const fields = [`${ordered.length} in this game`];
+  let used = 0;
+  for (let i = 0; i < ordered.length; i++) {
+    const e = ordered[i];
+    const f = `${e.label}${e.main ? '' : ' (variation)'}: ${quoted(e.texts, noteChars)}`;
+    if (used + f.length > totalChars && i > 0) {
+      fields.push(`+${ordered.length - i} more`);
+      break;
+    }
+    fields.push(f);
+    used += f.length;
+  }
+  return `[Notes: ${fields.join(' | ')}]`;
+}
 
 /** `[Tools: engine, tablebase]` ('' for none). */
 export function toolsBlock(names: string[]): string {
@@ -103,6 +160,15 @@ export function toolChipLabel(p: ChatToolPart): string {
   const r = p.result.trim();
   const err = /no result \(([^)]*)\)/.exec(r);
   if (err) return `${title}: no result (${err[1]})`;
+  if (r.startsWith('[Notes: ')) {
+    const on = /^\[Notes: on (\S+):/.exec(r);
+    if (on) return `Read your note on ${on[1]}`;
+    const none = /^\[Notes: none (?:on this position|on ([^\]\s]+)|in this game|at the start)/.exec(r);
+    if (none) return none[1] ? `No note on ${none[1]}` : 'No notes';
+    const n = /^\[Notes: (\d+) in this game/.exec(r);
+    if (n) return `Read your ${n[1]} note${n[1] === '1' ? '' : 's'}`;
+    return 'Read your notes';
+  }
   const ctx = parseContext(r);
   if (ctx.engine?.eval) {
     const best = ctx.engine.best ? `, best ${ctx.engine.best.replace(/^\d+\.+/, '')}` : '';

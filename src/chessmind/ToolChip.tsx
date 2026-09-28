@@ -44,7 +44,7 @@ export function ToolChip({ part, startFen }: Props) {
   const pending = part.result === undefined || (!part.result.trim() && part.ok === undefined);
   const failed = !pending && (part.ok === false || /: no result \(/.test(part.result ?? ''));
   const line = callLine(part, startFen);
-  const where = line ? `after ${line}` : 'current position';
+  const where = part.name === 'all_notes' ? 'whole game' : line ? `after ${line}` : 'current position';
   return (
     <span className={`cm-tool ${pending ? 'is-pending' : ''} ${failed ? 'is-error' : ''} ${open ? 'is-open' : ''}`} data-testid="chessmind-tool">
       <button

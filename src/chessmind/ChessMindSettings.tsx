@@ -128,11 +128,11 @@ export function ChessMindSettings({ cm }: { cm: ChessMindState }) {
               <span className="field-label">Tools</span>
               <select className="select" value={settings.tools} onChange={(e) => update({ tools: e.target.value as typeof settings.tools })} data-testid="chessmind-tools">
                 <option value="off">Off</option>
-                <option value="on">Engine (model decides)</option>
-                <option value="force">Engine, first call forced (demo)</option>
+                <option value="on">Engine + your notes (model decides)</option>
+                <option value="force">Same, first engine call forced (demo)</option>
               </select>
               <span className="field-hint">
-                The model may call Stockfish while it thinks or answers (up to 3 calls, {'≤'} 2.5 s each, on a separate engine); the result is inserted and shown as a chip. Only models trained with tools call on their own; forcing shows the plumbing on older ones.
+                The model may call Stockfish (up to 3 calls, {'≤'} 2.5 s each, on a separate engine) and read the notes you left on moves (read-only) while it thinks or answers; each result is inserted and shown as a chip. Only models trained with tools call on their own; forcing shows the plumbing on older ones.
               </span>
             </label>
           )}

@@ -6,7 +6,7 @@ import type { ChatMessage } from '../types';
 import { DEFAULT_LINE_RULES } from './lineRules';
 import type { GameAction } from '../state/gameReducer';
 import { newId } from '../state/pgn';
-import { TOOL_SPECS, errorText } from './tools';
+import { OFFERED_TOOLS, TOOL_SPECS, errorText } from './tools';
 import type { RunTool } from './useChessMindTools';
 
 /** One entry of chessmind/models.json (written by scripts/copy-chessmind.mjs). */
@@ -352,7 +352,7 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
           { id: answerId, role: 'assistant', kind: 'model', parts: [], originId: opts.originId, fen: opts.fen },
         ],
       });
-      const tools = settings.tools !== 'off' ? { names: ['engine'], takesLine: { engine: TOOL_SPECS.engine.takesLine }, force: settings.tools === 'force' ? 'engine' : null } : undefined;
+      const tools = settings.tools !== 'off' ? { names: OFFERED_TOOLS, takesLine: Object.fromEntries(OFFERED_TOOLS.map((n) => [n, TOOL_SPECS[n].takesLine])), force: settings.tools === 'force' ? 'engine' : null } : undefined;
       worker.postMessage({ type: 'chat', id, history, prompt: text, fen: opts.fen, context: opts.context, gameMoves: opts.gameMoves, contextText: opts.contextText || undefined, maxTokens: CHAT_MAX_TOKENS, temperature: settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: settings.think, maxThinkTokens: CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } }, tools } satisfies ToWorker);
     },
     [chat, status, dispatch, settings.think, settings.temperature, settings.lineEndAnswer, settings.lineEndThink, settings.maxLinePliesAnswer, settings.maxLinePliesThink, settings.tools],
