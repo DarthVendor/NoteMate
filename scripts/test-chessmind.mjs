@@ -2,11 +2,15 @@
 // (src/chessmind/fixtures/board-codes.json, from ChessMind's scripts/board_codes_fixture.py) and tokenizer v3
 // (src/chessmind/fixtures/tokenizer-v3.json, from ChessMind's scripts/tokenizer_fixture.py): text ids for
 // notation / unicode / whitespace strings, chat prompts, per-side game prompts and cropped per-side board rows; and
-// tokenizer v4 (tokenizer-v4.json, format 4): the same checks plus hidden-reasoning dialogues (encode, board rows, decode).
+// tokenizer v4 (tokenizer-v4.json, format 4): the same checks plus hidden-reasoning dialogues (encode, board rows, decode);
+// and the KV-cache slide (src/chessmind/kv.ts moveKeys).
 // Usage: node scripts/test-chessmind.mjs   (Node >= 23: imports the TypeScript sources directly)
 import { existsSync, readFileSync } from 'node:fs';
 import { ChessTokenizer } from '../src/chessmind/tokenizer.ts';
 import { BoardTracker, encodeFen, encodeGameWithBoards } from '../src/chessmind/boards.ts';
+import { moveKeys } from '../src/chessmind/kv.ts';
+
+let kvChecks = 0;
 
 const fx = JSON.parse(readFileSync(new URL('../src/chessmind/fixtures/board-codes.json', import.meta.url), 'utf8'));
 const tok = new ChessTokenizer(fx.chess_vocab, null);
@@ -92,5 +96,43 @@ if (existsSync(v4Url)) {
   }
   v4Summary = `${total - before} tokenizer-v4 checks (${f4.thinking.length} thinking cases)`;
 }
-console.log(`${boardChecks} board-code checks, ${v3Checks} tokenizer-v3 checks (${tv.texts.length} texts), ${v4Summary}; ${total - fail}/${total} passed`);
+// KV cache slide (src/chessmind/kv.ts): keys rotated at position p, moved down by d, equal the keys rotated at p - d.
+{
+  const before = total;
+  const heads = 3, headDim = 8, theta = 10000, n = 12, sinks = 2, drop = 5;
+  const raw = Array.from({ length: n * heads * headDim }, (_, i) => Math.sin(i * 1.7) * 2);
+  const rope = (pos) => {
+    const out = new Float32Array(heads * headDim);
+    for (let h = 0; h < heads; h++)
+      for (let i = 0; i < headDim / 2; i++) {
+        const a = pos * Math.pow(theta, (-2 * i) / headDim);
+        const x1 = raw[(pos * heads + h) * headDim + i], x2 = raw[(pos * heads + h) * headDim + headDim / 2 + i];
+        out[h * headDim + i] = x1 * Math.cos(a) - x2 * Math.sin(a);
+        out[h * headDim + headDim / 2 + i] = x1 * Math.sin(a) + x2 * Math.cos(a);
+      }
+    return out;
+  };
+  const buf = new Float32Array(n * heads * headDim);
+  for (let p = 0; p < n; p++) buf.set(rope(p), p * heads * headDim);
+  moveKeys(buf, sinks + drop, sinks, n - sinks - drop, heads, headDim, theta);
+  let worst = 0;
+  for (let p = sinks + drop; p < n; p++) {
+    // the token from position p now sits at p - drop: its key must be its raw vector rotated by p - drop
+    const want = new Float32Array(heads * headDim);
+    for (let h = 0; h < heads; h++)
+      for (let i = 0; i < headDim / 2; i++) {
+        const a = (p - drop) * Math.pow(theta, (-2 * i) / headDim);
+        const x1 = raw[(p * heads + h) * headDim + i], x2 = raw[(p * heads + h) * headDim + headDim / 2 + i];
+        want[h * headDim + i] = x1 * Math.cos(a) - x2 * Math.sin(a);
+        want[h * headDim + headDim / 2 + i] = x1 * Math.sin(a) + x2 * Math.cos(a);
+      }
+    const got = buf.subarray((p - drop) * heads * headDim, (p - drop + 1) * heads * headDim);
+    worst = Math.max(worst, ...got.map((g, j) => Math.abs(g - want[j])));
+  }
+  check('kv moveKeys re-rotates moved keys', worst < 1e-5, `max diff ${worst}`);
+  const sinkRow = buf.subarray(0, sinks * heads * headDim);
+  check('kv moveKeys keeps the sinks', same([...sinkRow], [...rope(0), ...rope(1)]));
+  kvChecks = total - before;
+}
+console.log(`${boardChecks} board-code checks, ${v3Checks} tokenizer-v3 checks (${tv.texts.length} texts), ${v4Summary}, ${kvChecks} kv checks; ${total - fail}/${total} passed`);
 process.exit(fail ? 1 : 0);

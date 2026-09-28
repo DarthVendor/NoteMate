@@ -35,6 +35,12 @@ export interface ModelManifest {
   tokenizer_format?: number;
   quant: string;
   inputs: string[];
+  /** The graph has a KV cache (see `kv`); absent = the stateless graph (the whole sequence every call). */
+  kv_cache?: boolean;
+  /** Per layer i: past_key.{i} / past_value.{i} float32[1, P, n_kv_heads, head_dim] in (the cached tokens, token-major),
+   * new_key.{i} / new_value.{i} [1, T, n_kv_heads, head_dim] out (the T new tokens' rows, appended by the caller).
+   * The new tokens take positions P .. P+T-1. */
+  kv?: { n_layer: number; n_kv_heads: number; head_dim: number; past: string[]; new: string[]; rope_theta?: number };
   chunks: { size: number; parts: string[] };
   files: { tokenizer: string; chess_vocab: string; parts: string };
 }
@@ -46,7 +52,8 @@ export interface MovePrediction {
 }
 
 export type ToWorker =
-  | { type: 'load'; base: string; backend: Backend }
+  /** threads: wasm threads (0 / unset = auto: several when the page is cross-origin isolated, else 1). */
+  | { type: 'load'; base: string; backend: Backend; threads?: number }
   /** contextPlies (board models only): feed <|game|> + the last N moves, the game token carrying the board at the crop. null = full game. */
   | { type: 'predict'; id: number; moves: string[]; top: number; contextPlies: number | null }
   | {
@@ -79,8 +86,9 @@ export type ToWorker =
 
 export type FromWorker =
   | { type: 'progress'; loaded: number; total: number; phase: 'download' | 'compile' }
-  | { type: 'ready'; manifest: ModelManifest; backend: string; loadMs: number; cached: boolean; hasText: boolean; thinking: boolean }
+  | { type: 'ready'; manifest: ModelManifest; backend: string; loadMs: number; cached: boolean; hasText: boolean; thinking: boolean; threads?: number; kvCache?: boolean }
   | { type: 'prediction'; id: number; moves: MovePrediction[]; ms: number; tokens: number }
+  /** msPerToken: mean of the steps after the first (the first, which reads the prompt, is prefillMs). */
   | { type: 'chat-update'; id: number; parts: DialoguePart[]; tokens: number; msPerToken: number; done: boolean; stopped?: boolean; prefillMs?: number; predictions?: MovePrediction[] }
   | { type: 'picked'; id: number; uci: string | null; p: number; ms: number; tokens: number }
   | { type: 'error'; id?: number; message: string };
