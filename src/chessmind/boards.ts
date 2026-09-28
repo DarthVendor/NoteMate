@@ -111,7 +111,9 @@ export function boardFromSnapshot(tok: ChessTokenizer, ids: number[]): TrackedBo
  * later <|line|>s start from it (until the next snapshot or <|bos|> / <|eos|> / <|pad|>). Hidden reasoning
  * (format 4): a snapshot taken inside `<|think|> ... <|end_think|>` applies until <|end_think|> only, which shows no
  * board. In-game calculation: a <|line|> while a <|game|> board is active starts from a copy of that board and
- * <|end_line|> returns to it. `startFen`: the first <|game|> starts there (a cropped game).
+ * <|end_line|> returns to it. Think-then-move (`<|game|> ... <|think|> <side> text / lines <|end_think|> move`): inside
+ * a game <|end_think|> shows the game position again (closing a line left open) instead of ending the board, so the
+ * move after it is played on the game board. `startFen`: the first <|game|> starts there (a cropped game).
  * Line branches (format 5): inside a line <|branch|> starts from the position before the last move of the current
  * segment (the current position when it has no move yet) and <|end_branch|> returns to the enclosing segment's board;
  * outside a line (or without an open branch) they keep the row. End markers keep the row; ending the line drops open
@@ -204,6 +206,17 @@ export class BoardTracker {
     if (id === tok.thinkId && !this.inGame) {
       this.thinkSaved = { snapshot: this.snapshot };
     } else if (this.endThink !== null && id === this.endThink) {
+      if (this.inGame && this.board) {
+        // think-then-move: back to the game position (a line left open closes with the think), so the move after
+        // <|end_think|> is played on the game board
+        if (this.gameBoard) {
+          this.board = this.gameBoard;
+          this.gameBoard = null;
+        }
+        this.frames = [];
+        this.current = this.board.row();
+        return this.current;
+      }
       if (this.thinkSaved) {
         this.snapshot = this.thinkSaved.snapshot;
         this.thinkSaved = null;

@@ -3,6 +3,7 @@ import { Chess, DEFAULT_POSITION } from 'chess.js';
 import { EngineClient } from '../engine/EngineClient';
 import { ENGINE_BUILDS, resolveEngineSource, type EngineAvailability, type EngineSettings, type EngineSource } from '../engine/engines';
 import type { useChessMind } from '../chessmind/useChessMind';
+import { DEFAULT_THINK_MOVE_TOKENS, type PickThink, type ThinkMode } from '../chessmind/protocol';
 import { pathTo, type GameAction } from '../state/gameReducer';
 import { newId } from '../state/pgn';
 import { ROOT_ID, type GameState } from '../types';
@@ -24,6 +25,10 @@ export interface SimSettings {
   /** Pause after each move, for watching (ms). */
   delay: number;
   maxPlies: number;
+  /** Think before moving (models that can think; ChessMind's think-then-move): never, the model's choice, always. */
+  think: ThinkMode;
+  /** Think budget (tokens) per move. */
+  thinkTokens: number;
 }
 
 export const DEFAULT_SIM_SETTINGS: SimSettings = {
@@ -39,7 +44,17 @@ export const DEFAULT_SIM_SETTINGS: SimSettings = {
   games: 4,
   delay: 300,
   maxPlies: 300,
+  think: 'off',
+  thinkTokens: DEFAULT_THINK_MOVE_TOKENS,
 };
+
+/** The think before the model's latest move: the position it thought about and, once played, the move (SAN). */
+export interface SimThought {
+  fen: string;
+  ply: number;
+  san: string | null;
+  think: PickThink;
+}
 
 export type SimResult = '1-0' | '0-1' | '1/2-1/2';
 
@@ -163,6 +178,7 @@ export function useSimulate(opts: {
   const [live, setLive] = useState<SimLive | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [engineName, setEngineName] = useState('');
+  const [thought, setThought] = useState<SimThought | null>(null);
   const [latency, setLatency] = useState<{ model: number[]; modelWall: number[]; engine: number[] }>({ model: [], modelWall: [], engine: [] });
 
   const latest = useRef(opts);
@@ -320,9 +336,15 @@ export function useSimulate(opts: {
           let uci: string | null;
           const t0 = performance.now();
           if (modelTurn) {
-            const r = await latest.current.cm.pick(moves, s.choice === 'sample' ? s.temperature : 0);
+            const ply = gameMoves.length;
+            const r = await latest.current.cm.pick(moves, s.choice === 'sample' ? s.temperature : 0, {
+              think: s.think,
+              maxThinkTokens: s.thinkTokens,
+              onThink: (think) => setThought({ fen, ply, san: null, think }),
+            });
             const wall = performance.now() - t0;
             uci = r.uci;
+            if (s.think !== 'off') setThought(r.think ? { fen, ply, san: null, think: r.think } : null);
             modelMs += wall;
             modelN++;
             setLatency((l) => ({ ...l, model: [...l.model, r.ms], modelWall: [...l.modelWall, wall] }));
@@ -341,6 +363,10 @@ export function useSimulate(opts: {
             san = chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] }).san;
           } catch {
             throw new Error(`${modelTurn ? 'ChessMind' : 'Stockfish'} played an illegal move ${uci} in ${fen}`);
+          }
+          if (modelTurn && s.think !== 'off') {
+            const played = san;
+            setThought((th) => (th && th.fen === fen ? { ...th, san: played } : th));
           }
           const id = newId();
           latest.current.dispatch({ type: 'APPEND_MOVE', parentId: parent, uci, id, goto: true });
@@ -411,6 +437,7 @@ export function useSimulate(opts: {
     const c: Control = { cancelled: false, paused, steps: paused ? 1 : 0, wake: null };
     ctl.current = c;
     setError(null);
+    setThought(null);
     setLatency({ model: [], modelWall: [], engine: [] });
     void run(c);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -435,6 +462,7 @@ export function useSimulate(opts: {
     c.cancelled = true;
     c.wake?.();
     engineRef.current?.client.stop();
+    latest.current.cm.stopPicks();
   }, []);
 
   /** One move: starts a paused run if none is going. */
@@ -449,5 +477,5 @@ export function useSimulate(opts: {
 
   const clear = useCallback(() => setGames([]), []);
 
-  return { settings, update, phase, games, live, error, engineName, latency, start: () => start(false), pause, resume, stop, step, clear };
+  return { settings, update, phase, games, live, error, engineName, latency, thought, start: () => start(false), pause, resume, stop, step, clear };
 }

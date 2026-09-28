@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ChessMindWorker from './worker.ts?worker&inline';
-import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type ThinkMode, type ToWorker } from './protocol';
+import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type PickThink, type ThinkMode, type ToWorker } from './protocol';
 import { splitThink, type DialogueTurn } from './tokenizer';
 import type { ChatMessage } from '../types';
 import { DEFAULT_LINE_RULES } from './lineRules';
@@ -59,6 +59,15 @@ export interface PickResult {
   p: number;
   ms: number;
   tokens: number;
+  /** The think written before the move (think picks of models that can think; absent when it moved without one). */
+  think?: PickThink;
+}
+
+/** Think-then-move for pick(): off / the model's choice / always, the think budget, and the streamed think. */
+export interface PickOptions {
+  think?: ThinkMode;
+  maxThinkTokens?: number;
+  onThink?: (think: PickThink) => void;
 }
 
 export type ChessMindStatus = 'off' | 'loading' | 'ready' | 'error';
@@ -118,7 +127,7 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
   const chatId = useRef<number | null>(null);
   const chatMsg = useRef<string | null>(null);
   /** Outstanding pick() requests (the simulator), by worker request id. */
-  const picks = useRef(new Map<number, { resolve: (r: PickResult) => void; reject: (e: Error) => void }>());
+  const picks = useRef(new Map<number, { resolve: (r: PickResult) => void; reject: (e: Error) => void; onThink?: (t: PickThink) => void }>());
   const runToolRef = useRef(runTool);
   useEffect(() => {
     runToolRef.current = runTool;
@@ -180,7 +189,14 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
           if (key !== undefined) setPrediction({ key, moves: m.moves, ms: m.ms, tokens: m.tokens });
           break;
         }
-        case 'chat-update':
+        case 'chat-update': {
+          const think = picks.current.get(m.id)?.onThink;
+          if (think) {
+            // a think pick streaming its think (one think part)
+            const part = m.parts[0];
+            if (part?.kind === 'think') think({ parts: part.parts, tokens: part.tokens ?? 0, open: !!part.open });
+            break;
+          }
           if (m.id !== chatId.current || !chatMsg.current) break;
           dispatch({
             type: 'CHAT_PATCH',
@@ -193,6 +209,7 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
             chatMsg.current = null;
           }
           break;
+        }
         case 'debug':
           console.log('[chessmind-debug]', JSON.stringify(m.data));
           break;
@@ -213,7 +230,7 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
         case 'picked': {
           const p = picks.current.get(m.id);
           picks.current.delete(m.id);
-          p?.resolve({ uci: m.uci, p: m.p, ms: m.ms, tokens: m.tokens });
+          p?.resolve({ uci: m.uci, p: m.p, ms: m.ms, tokens: m.tokens, ...(m.think ? { think: m.think } : {}) });
           break;
         }
         case 'error':
@@ -276,21 +293,38 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
 
   /** One model move for the position after `movesUci` (from the standard start), legal-masked. */
   const pick = useCallback(
-    (movesUci: string[], temperature: number): Promise<PickResult> => {
+    (movesUci: string[], temperature: number, opts: PickOptions = {}): Promise<PickResult> => {
       const worker = workerRef.current;
       if (!worker || status !== 'ready') return Promise.reject(new Error('load a ChessMind model first'));
       const id = ++reqId.current;
       return new Promise<PickResult>((resolve, reject) => {
-        picks.current.set(id, { resolve, reject });
+        picks.current.set(id, { resolve, reject, onThink: opts.onThink });
         // The graph has no KV cache, so a full-history pick costs O(plies) per move and games got slower and
         // slower (0.5 s -> 3 s by ply 50 for the 250M model). Board models barely use history beyond a few plies
         // (probe: 44.2% top-1 with the full game vs 43.9% with 4 plies), so the simulator caps it at 16.
         const simContext = info?.manifest.boards ? Math.min(contextPlies ?? SIM_CONTEXT_PLIES, SIM_CONTEXT_PLIES) : contextPlies;
-        worker.postMessage({ type: 'pick', id, moves: movesUci, temperature, contextPlies: simContext } satisfies ToWorker);
+        // Think picks: think lines use the chat settings' think line rules; the worker ignores `think` for models
+        // that cannot think.
+        const think = opts.think && opts.think !== 'off' ? opts.think : undefined;
+        worker.postMessage({
+          type: 'pick',
+          id,
+          moves: movesUci,
+          temperature,
+          contextPlies: simContext,
+          ...(think
+            ? { think, maxThinkTokens: opts.maxThinkTokens, lineTemperature: DEFAULT_LINE_TEMPERATURE, lineRules: { endP: { think: settings.lineEndThink }, maxPlies: { think: settings.maxLinePliesThink } } }
+            : {}),
+        } satisfies ToWorker);
       });
     },
-    [status, contextPlies, info?.manifest.boards],
+    [status, contextPlies, info?.manifest.boards, settings.lineEndThink, settings.maxLinePliesThink],
   );
+
+  /** Stop the running picks (a think pick answers with no move). */
+  const stopPicks = useCallback(() => {
+    for (const id of picks.current.keys()) workerRef.current?.postMessage({ type: 'stop', id } satisfies ToWorker);
+  }, []);
 
   /** Send a question to the model; the answer streams into a new assistant message. */
   const ask = useCallback(
@@ -361,5 +395,5 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
 
   const currentPrediction = prediction && prediction.key === `${movesKey}|${contextPlies}` ? prediction : null;
 
-  return { pick, setSuspended, contextPlies, settings, update, models, modelsError, modelId, status, error, progress, info, prediction: currentPrediction, chatBusy, canGenerate: status === 'ready' && !chatBusy, ask, analyse, stop, detach };
+  return { pick, stopPicks, setSuspended, contextPlies, settings, update, models, modelsError, modelId, status, error, progress, info, prediction: currentPrediction, chatBusy, canGenerate: status === 'ready' && !chatBusy, ask, analyse, stop, detach };
 }

@@ -8,6 +8,8 @@ import { toPgn } from '../state/gameReducer';
 import { ROOT_ID, type GameState, type MoveNode } from '../types';
 import { keepArrows } from '../ui/keepArrows';
 import { MenuLabel, Popover } from '../ui/Popover';
+import { ThinkingBlock } from '../chessmind/ThinkingBlock';
+import { DEFAULT_THINK_MOVE_TOKENS } from '../chessmind/protocol';
 
 interface Props {
   sim: ReturnType<typeof useSimulate>;
@@ -53,8 +55,16 @@ function gamePgn(g: SimGame): string {
   return toPgn(game);
 }
 
+/** "12...Nf6" for the move played from `fen` ("12..." while it is still being chosen). */
+function moveLabel(fen: string, san: string | null): string {
+  const [, side, , , , full] = fen.split(' ');
+  return `${full}${side === 'w' ? '.' : '...'}${san ?? ''}`;
+}
+
 export function SimulatePanel({ sim, cm, state, dispatch, onExport }: Props) {
-  const { settings: s, update, phase, games, live, error, latency } = sim;
+  const { settings: s, update, phase, games, live, error, latency, thought } = sim;
+  // Models without <|end_think|> ignore the think option (known once a model is loaded).
+  const canThink = cm.info ? cm.info.thinking : true;
   const busy = phase !== 'idle';
   const t = tally(games);
   const asWhite = tally(games.filter((g) => g.modelColor === 'w'));
@@ -87,7 +97,8 @@ export function SimulatePanel({ sim, cm, state, dispatch, onExport }: Props) {
 
       <div className="sim-setup">
         <p className="sim-summary" data-testid="sim-summary">
-          ChessMind <b>{colorLabel}</b>, {s.choice === 'sample' ? `sampling at ${s.temperature.toFixed(2)}` : 'most likely move'} vs Stockfish <b>skill {s.skill}</b>{' '}
+          ChessMind <b>{colorLabel}</b>, {s.choice === 'sample' ? `sampling at ${s.temperature.toFixed(2)}` : 'most likely move'}
+          {s.think !== 'off' && `, ${s.think === 'on' ? 'thinking' : 'thinking when it chooses'} (≤${s.thinkTokens} tokens)`} vs Stockfish <b>skill {s.skill}</b>{' '}
           <span className="faint">(≈{skillElo(s.skill)})</span> at {limitLabel(s)}/move · <b>{s.games}</b> game{s.games === 1 ? '' : 's'} from the {s.start === 'current' ? 'current' : 'initial'} position
         </p>
         <Popover
@@ -159,6 +170,20 @@ export function SimulatePanel({ sim, cm, state, dispatch, onExport }: Props) {
                     <input type="number" min={0} max={1000} step={50} value={s.delay} onChange={(e) => update({ delay: num(e.target.value, 0, 1000, 300) })} data-testid="sim-delay" />
                   </label>
                   <label>
+                    Think before moving
+                    <select value={s.think} onChange={(e) => update({ think: e.target.value as typeof s.think })} data-testid="sim-think">
+                      <option value="off">off</option>
+                      <option value="auto">model decides</option>
+                      <option value="on">always</option>
+                    </select>
+                  </label>
+                  {s.think !== 'off' && (
+                    <label>
+                      Think budget (tokens)
+                      <input type="number" min={16} max={2048} step={16} value={s.thinkTokens} onChange={(e) => update({ thinkTokens: num(e.target.value, 16, 2048, DEFAULT_THINK_MOVE_TOKENS) })} data-testid="sim-think-tokens" />
+                    </label>
+                  )}
+                  <label>
                     Max plies
                     <input type="number" min={2} max={2000} value={s.maxPlies} onChange={(e) => update({ maxPlies: num(e.target.value, 2, 2000, 300) })} data-testid="sim-max-plies" />
                   </label>
@@ -167,6 +192,7 @@ export function SimulatePanel({ sim, cm, state, dispatch, onExport }: Props) {
               <p className="field-hint">
                 Opponent: a separate Stockfish ({sim.engineName || 'the analysis engine’s build, else Lite'}) with Threads 1. Each game is a new variation with notes on its first and last moves.
               </p>
+              {s.think !== 'off' && !canThink && <p className="field-hint">This model cannot think (no &lt;|end_think|&gt; token): it moves directly.</p>}
             </div>
           )}
         </Popover>
@@ -217,6 +243,22 @@ export function SimulatePanel({ sim, cm, state, dispatch, onExport }: Props) {
             </p>
           )}
           {error && <p className="error" data-testid="sim-error">{error}</p>}
+          {thought && (
+            <div className="sim-thought" data-testid="sim-thought">
+              <p className="sim-meta">
+                Think before {moveLabel(thought.fen, thought.san)}
+              </p>
+              <ThinkingBlock
+                key={`${thought.fen}|${thought.ply}`}
+                parts={thought.think.parts}
+                open={thought.think.open}
+                tokens={thought.think.tokens}
+                done={thought.san !== null || phase === 'idle'}
+                startFen={thought.fen}
+                budget={s.thinkTokens}
+              />
+            </div>
+          )}
           {(latency.model.length > 0 || latency.engine.length > 0) && (
             <p className="sim-meta" data-testid="sim-latency">
               ChessMind {avg(latency.modelWall).toFixed(0)} ms/move (model {avg(latency.model).toFixed(0)} ms, {latency.model.length} moves) · Stockfish{' '}

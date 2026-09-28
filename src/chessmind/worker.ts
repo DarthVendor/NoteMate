@@ -16,7 +16,8 @@ import { DEFAULT_LINE_RULES, probAmong, type LineRules } from './lineRules';
 import { dialoguePosition, rewindCandidates } from './snapshots';
 import { LineConstraint, MAX_TOOL_CALLS, ToolConstraint, type GenConstraint, type ToolRequestInfo } from './constraint';
 import { DEFAULT_TOOL_TIMEOUT_MS, RESULT_BUDGET, TOOL_SPECS, addToolsBlock, errorText, fitToolResult, type ToolResultData } from './tools';
-import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, ORT_DIR, ORT_SCRIPT_FILE, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type ToWorker } from './protocol';
+import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, DEFAULT_THINK_MOVE_TEMPERATURE, DEFAULT_THINK_MOVE_TOKENS, DEFAULT_THINK_MOVE_TOP_K, ORT_DIR, ORT_SCRIPT_FILE, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type PickThink, type ToWorker } from './protocol';
+import { ThinkMoveConstraint } from './thinkMove';
 
 // Minimal typing of the onnxruntime-web globals used here.
 interface OrtTensor { data: Float32Array | BigInt64Array; dims: readonly number[]; dispose?: () => void }
@@ -417,8 +418,16 @@ async function drainPredict() {
   }
 }
 
-/** One move for the simulator: argmax or a sample from p^(1/T) over the legal moves. */
+/** One move for the simulator: argmax or a sample from p^(1/T) over the legal moves (after a think, see thinkPick). */
 async function pick(req: Extract<ToWorker, { type: 'pick' }>) {
+  const t = tok!;
+  if (req.think && req.think !== 'off' && t.hasText && t.supportsThinking) {
+    if (await thinkPick(req)) return;
+    if (stopped.has(req.id)) {
+      post({ type: 'picked', id: req.id, uci: null, p: 0, ms: 0, tokens: 0 });
+      return;
+    }
+  }
   const r = await topMoves(req.moves, Infinity, req.contextPlies);
   if (r.moves.length === 0) {
     post({ type: 'picked', id: req.id, uci: null, p: 0, ms: r.ms, tokens: r.tokens });
@@ -437,6 +446,92 @@ async function pick(req: Extract<ToWorker, { type: 'pick' }>) {
     }
   }
   post({ type: 'picked', id: req.id, uci: chosen.uci, p: chosen.p, ms: r.ms, tokens: r.tokens });
+}
+
+/**
+ * Think-then-move (port of think_move.play_move_with_think): after the per-side game prompt, an optional
+ * `<|think|> <side> text / lines <|end_think|>` and then the move, under ThinkMoveConstraint, on the KV cache. Text is
+ * sampled at thinkTemperature / thinkTopK, think lines at lineTemperature (greedy by default), the move (and the
+ * auto mode's first token) at the request's temperature. The think streams as chat-update messages; false when no
+ * move came out (budget or stop), and the caller picks without the think.
+ */
+async function thinkPick(req: Extract<ToWorker, { type: 'pick' }>): Promise<boolean> {
+  const t = tok!;
+  const chess = new Chess();
+  for (const m of req.moves) chess.move({ from: m.slice(0, 2), to: m.slice(2, 4), promotion: m[4] });
+  if (chess.moves().length === 0) return false;
+  const limit = manifest!.max_seq_len;
+  const game = gamePrefix(req.moves, req.contextPlies);
+  // The think fits the context next to the game prompt (as play_move_with_think's budget), at least a few tokens.
+  const maxThink = Math.max(8, Math.min(req.maxThinkTokens ?? DEFAULT_THINK_MOVE_TOKENS, limit - game.ids.length - 8));
+  const rules: LineRules = {
+    ...DEFAULT_LINE_RULES,
+    ...req.lineRules,
+    endP: { ...DEFAULT_LINE_RULES.endP, ...req.lineRules?.endP },
+    maxPlies: { ...DEFAULT_LINE_RULES.maxPlies, ...req.lineRules?.maxPlies },
+  };
+  const cons = new ThinkMoveConstraint(t, chess.fen(), req.think === 'on' ? true : null, maxThink, rules);
+  // Board rows of the generated tokens: a legacy tracker primed with the whole game (its state is the game position).
+  let tracker: BoardTracker | null = null;
+  if (game.rows) {
+    tracker = new BoardTracker(t);
+    tracker.rows(t.encodeGame(req.moves, undefined, manifest!.perspective_games ? ChessTokenizer.sideToMove(req.moves.length) : undefined));
+  }
+  const textT = req.thinkTemperature ?? DEFAULT_THINK_MOVE_TEMPERATURE;
+  const textK = req.thinkTopK ?? DEFAULT_THINK_MOVE_TOP_K;
+  const lineT = req.lineTemperature ?? DEFAULT_LINE_TEMPERATURE;
+  let p = 0;
+  let phase = cons.phase;
+  debugTag = `think-pick ${req.moves.length}`;
+  debugMoves = req.moves;
+  const t0 = performance.now();
+  const endThink = t.endThinkId!;
+  const renderThink = (out: number[]): PickThink | undefined => {
+    if (out[0] !== t.thinkId) return undefined;
+    const close = out.indexOf(endThink);
+    const ids = close < 0 ? out : out.slice(0, close + 1);
+    const parts = t.decodeDialogueContent(ids);
+    const think = parts[0]?.kind === 'think' ? parts[0].parts : [];
+    return { parts: think, tokens: (close < 0 ? out.length : close) - 1, open: close < 0 };
+  };
+  const out = await generate({
+    id: req.id,
+    prefix: game.ids,
+    prefixRows: game.rows,
+    nextRow: tracker ? (id) => tracker.feed(id) : undefined,
+    // the think, then closes (open branches, the line, <|end_think|>) and the move
+    maxTokens: maxThink + 8,
+    temperature: textT,
+    topK: textK,
+    allowed: (o) => {
+      const a = cons.allowed(o);
+      phase = cons.phase;
+      return a;
+    },
+    sampling: () => {
+      if (phase === 'think' && cons.inLine) return { temperature: lineT, topK: 0 };
+      if (phase === 'move' || (phase === 'start' && cons.think !== true)) return { temperature: req.temperature, topK: 0 };
+      return { temperature: textT, topK: textK };
+    },
+    observe: (logits, allowed, next) => {
+      if (t.isMoveId(next) && (phase === 'move' || phase === 'start')) p = probAmong(logits, allowed.filter((i) => t.isMoveId(i)), next);
+    },
+    endLine: { id: t.endLineId, threshold: () => cons.endThreshold() },
+    stops: new Set([t.eosId]),
+    until: (o) => {
+      cons.sync(o);
+      return cons.done;
+    },
+    render: (o) => {
+      cons.sync(o);
+      const th = renderThink(o);
+      return th ? [{ kind: 'think', parts: th.parts, open: th.open, tokens: th.tokens }] : [];
+    },
+  });
+  cons.sync(out);
+  if (cons.move === null) return false;
+  post({ type: 'picked', id: req.id, uci: cons.move, p, ms: performance.now() - t0, tokens: game.ids.length + out.length, think: renderThink(out) });
+  return true;
 }
 
 /** Sample from `logits` restricted to `allowed` ids (temperature 0 = greedy, top-k over the allowed set). */
@@ -473,15 +568,21 @@ interface GenOptions {
   /** Lines: <|end_line|> is chosen once its probability among the allowed ids reaches `threshold()` (null = off). */
   endLine?: { id: number; threshold: () => number | null };
   stops: Set<number>;
+  /** Also stop once this holds for the ids so far (think picks: the move was sampled). */
+  until?: (out: number[]) => boolean;
   render: (out: number[]) => DialoguePart[];
   extra?: Partial<Extract<FromWorker, { type: 'chat-update' }>>;
   /** Tool calls: after each sampled id (not a stop), ids to append as if generated (a tool result and <|end_tool|>),
    * read on the KV cache with the next forward; `room` = ids left in the budget. */
   inject?: (out: number[], room: number) => Promise<number[] | null>;
+  /** Per-step sampling (read after `allowed`): overrides `temperature` / `topK` / `lineTemperature` (think picks). */
+  sampling?: () => { temperature: number; topK: number };
+  /** Called with each step's logits, the allowed ids and the chosen id. */
+  observe?: (logits: Float32Array, allowed: number[], next: number) => void;
 }
 
-/** Sample up to maxTokens ids, streaming chat-update messages; stops on a stop id or a stop request. */
-async function generate(o: GenOptions) {
+/** Sample up to maxTokens ids, streaming chat-update messages; stops on a stop id or a stop request. Returns the ids. */
+async function generate(o: GenOptions): Promise<number[]> {
   const limit = manifest!.max_seq_len;
   const kv = !!manifest!.kv_cache;
   // The prompt keeps room to answer (up to a quarter of the context); a longer generation slides the window below.
@@ -498,7 +599,7 @@ async function generate(o: GenOptions) {
   for (let step = 0; out.length < o.maxTokens; step++) {
     if (stopped.has(o.id)) {
       post({ type: 'chat-update', id: o.id, parts: o.render(out), tokens: out.length, msPerToken: out.length ? msPerToken() : 0, done: true, stopped: true, prefillMs, ...o.extra });
-      return;
+      return out;
     }
     if (ids.length > limit && kv) {
       // Context full: keep the first KV_SINKS tokens and drop the oldest after them, KV_SLIDE of the context at a
@@ -517,10 +618,12 @@ async function generate(o: GenOptions) {
     const dt = performance.now() - t0;
     if (step === 0) prefillMs = dt;
     genMs += dt;
-    const temperature = inLine && o.lineTemperature !== undefined ? o.lineTemperature : o.temperature;
     const allowed = o.allowed(out);
+    const custom = o.sampling?.();
+    const temperature = custom ? custom.temperature : inLine && o.lineTemperature !== undefined ? o.lineTemperature : o.temperature;
     const tau = o.endLine?.threshold() ?? null;
-    const next = tau !== null && probAmong(logits, allowed, o.endLine!.id) >= tau ? o.endLine!.id : sample(logits, allowed, temperature, o.topK);
+    const next = tau !== null && probAmong(logits, allowed, o.endLine!.id) >= tau ? o.endLine!.id : sample(logits, allowed, temperature, custom ? custom.topK : o.topK);
+    o.observe?.(logits, allowed, next);
     out.push(next);
     if (next === lineId) inLine = true;
     else if (next === endLineId) inLine = false;
@@ -536,12 +639,13 @@ async function generate(o: GenOptions) {
         if (rows && o.nextRow) rows = [...rows, o.nextRow(x)];
       }
     }
-    const done = o.stops.has(next) || out.length >= o.maxTokens || stopped.has(o.id);
+    const done = o.stops.has(next) || out.length >= o.maxTokens || stopped.has(o.id) || !!o.until?.(out);
     post({ type: 'chat-update', id: o.id, parts: o.render(out), tokens: out.length, msPerToken: msPerToken(), done, prefillMs, ...o.extra });
-    if (done) return;
+    if (done) return out;
     // Let queued messages (stop, predict) in between steps.
     await new Promise((r) => setTimeout(r, 0));
   }
+  return out;
 }
 
 async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
@@ -714,7 +818,9 @@ ctx.onmessage = (e: MessageEvent<ToWorker>) => {
       break;
     case 'pick':
       if (!session) return fail(new Error('model not loaded'), msg.id);
-      pick(msg).catch((err) => fail(err, msg.id));
+      pick(msg)
+        .catch((err) => fail(err, msg.id))
+        .finally(() => stopped.delete(msg.id));
       break;
     case 'stop':
       stopped.add(msg.id);

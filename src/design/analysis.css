@@ -274,6 +274,7 @@
 .sim-buttons { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .sim-live { margin: 0; color: var(--text); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 .sim-meta { margin: 0; color: var(--text-2); font-size: var(--fs-xs); line-height: var(--lh-normal); }
+.sim-thought { display: flex; flex-direction: column; gap: 4px; }
 .sim-score { display: flex; flex-direction: column; gap: 8px; }
 .sim-score table { width: 100%; border-collapse: collapse; font: var(--fs-xs) var(--font-mono); font-variant-numeric: tabular-nums; }
 .sim-score th, .sim-score td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--divider); }

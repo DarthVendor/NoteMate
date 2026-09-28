@@ -1,5 +1,6 @@
 import type { DialoguePart, DialogueTurn } from './tokenizer';
 import type { LineRules } from './lineRules';
+import type { ChatLeafPart } from '../types';
 
 /** Default think budget: tokens of hidden reasoning before <|end_think|> is forced (as chat() in generate.py).
  * Training thinks run from ~50 to ~2,000 tokens; a whole training example fits the 2,560-token context. */
@@ -44,6 +45,19 @@ export interface ModelManifest {
   kv?: { n_layer: number; n_kv_heads: number; head_dim: number; past: string[]; new: string[]; rope_theta?: number };
   chunks: { size: number; parts: string[] };
   files: { tokenizer: string; chess_vocab: string; parts: string };
+}
+
+/** Think budget of a think-then-move pick (think_move.DEFAULT_THINK_TOKENS in ChessMind). */
+export const DEFAULT_THINK_MOVE_TOKENS = 384;
+/** Think text sampling of a think-then-move pick (play_move_with_think's defaults). */
+export const DEFAULT_THINK_MOVE_TEMPERATURE = 0.8;
+export const DEFAULT_THINK_MOVE_TOP_K = 50;
+
+/** The think before a picked move: its parts (text / lines), its tokens, and whether it was cut off (no <|end_think|>). */
+export interface PickThink {
+  parts: ChatLeafPart[];
+  tokens: number;
+  open: boolean;
 }
 
 export interface MovePrediction {
@@ -96,8 +110,26 @@ export type ToWorker =
   | { type: 'tool-result'; id: number; call: number; text: string; ok: boolean; compact?: string[] }
   | { type: 'explain'; id: number; moves: string[]; maxTokens: number; temperature: number; topK: number; top: number; contextPlies: number | null }
   | { type: 'stop'; id: number }
-  /** Choose one move for the position after `moves` (legal-masked): argmax when temperature is 0, else sampled. Not coalesced like predict. */
-  | { type: 'pick'; id: number; moves: string[]; temperature: number; contextPlies: number | null };
+  /** Choose one move for the position after `moves` (legal-masked): argmax when temperature is 0, else sampled. Not coalesced like predict.
+   * Think-then-move (models whose tokenizer has <|end_think|>; thinkMove.ts): `think` 'on' writes `<|think|> <side>
+   * text / lines <|end_think|>` before the move, 'auto' lets the model choose, 'off' (default) picks directly. The
+   * think streams as `chat-update` messages with this id (one think part); `temperature` is the move's. */
+  | {
+      type: 'pick';
+      id: number;
+      moves: string[];
+      temperature: number;
+      contextPlies: number | null;
+      think?: ThinkMode;
+      /** Most think tokens before the close is forced (default DEFAULT_THINK_MOVE_TOKENS). */
+      maxThinkTokens?: number;
+      /** Think text sampling (default 0.8 / 50). */
+      thinkTemperature?: number;
+      thinkTopK?: number;
+      /** Think lines (default DEFAULT_LINE_TEMPERATURE = 0: greedy). */
+      lineTemperature?: number;
+      lineRules?: { endP?: Partial<LineRules['endP']>; maxPlies?: Partial<LineRules['maxPlies']>; stopFinished?: boolean };
+    };
 
 export type FromWorker =
   | { type: 'progress'; loaded: number; total: number; phase: 'download' | 'compile' }
@@ -105,7 +137,8 @@ export type FromWorker =
   | { type: 'prediction'; id: number; moves: MovePrediction[]; ms: number; tokens: number }
   /** msPerToken: mean of the steps after the first (the first, which reads the prompt, is prefillMs). */
   | { type: 'chat-update'; id: number; parts: DialoguePart[]; tokens: number; msPerToken: number; done: boolean; stopped?: boolean; prefillMs?: number; predictions?: MovePrediction[] }
-  | { type: 'picked'; id: number; uci: string | null; p: number; ms: number; tokens: number }
+  /** `think`: the think written before the move (think picks only; absent when the model moved without one). */
+  | { type: 'picked'; id: number; uci: string | null; p: number; ms: number; tokens: number; think?: PickThink }
   | { type: 'error'; id?: number; message: string }
   /** The model called a tool (generation is paused): run `name` on `fen` (the position asked about: the call's line
    * `moves` played from `baseFen`, or the current position) and answer with `tool-result`. `numbers`: move numbers of
