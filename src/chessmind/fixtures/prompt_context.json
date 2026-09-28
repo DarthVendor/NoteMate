@@ -237,10 +237,10 @@
    "candidates": [],
    "show_best": true,
    "numbers": false,
-   "text": "[Engine: Stockfish, depth 18 | eval +0.4 | best Ne7+ | line Ne7+ Kh8 | also Nc7 -0.1, Nxf6+ -0.2]",
+   "text": "[Position: White to play] [Engine: Stockfish, depth 18 | eval +0.4 | best Ne7+ | line Ne7+ Kh8 | also Nc7 -0.1, Nxf6+ -0.2]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": true,
     "engine": {
      "name": "Stockfish",
      "depth": 18,
@@ -284,10 +284,10 @@
    ],
    "show_best": true,
    "numbers": false,
-   "text": "[Candidates: Ne7+ 91%, Nc7 6%, Nxf6+ 2%]",
+   "text": "[Position: White to play] [Candidates: Ne7+ 91%, Nc7 6%, Nxf6+ 2%]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": true,
     "engine": null,
     "candidates": [
      [
@@ -541,10 +541,10 @@
    "candidates": [],
    "show_best": true,
    "numbers": false,
-   "text": "[Engine: Stockfish, depth 18 | eval +0.4 | best Ng5 | line Ng5 Kh8 | also Nxe5 -0.1, Nh4 -0.2]",
+   "text": "[Position: White to play] [Engine: Stockfish, depth 18 | eval +0.4 | best Ng5 | line Ng5 Kh8 | also Nxe5 -0.1, Nh4 -0.2]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": true,
     "engine": {
      "name": "Stockfish",
      "depth": 18,
@@ -588,10 +588,10 @@
    ],
    "show_best": true,
    "numbers": false,
-   "text": "[Candidates: Ng5 91%, Nxe5 6%, Nh4 2%]",
+   "text": "[Position: White to play] [Candidates: Ng5 91%, Nxe5 6%, Nh4 2%]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": true,
     "engine": null,
     "candidates": [
      [
@@ -845,10 +845,10 @@
    "candidates": [],
    "show_best": true,
    "numbers": false,
-   "text": "[Engine: Stockfish, depth 18 | eval +0.4 | best Ne7 | line Ne7 Nxc5 | also Nh6 -0.1, Be7 -0.2]",
+   "text": "[Position: Black to play] [Engine: Stockfish, depth 18 | eval +0.4 | best Ne7 | line Ne7 Nxc5 | also Nh6 -0.1, Be7 -0.2]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": false,
     "engine": {
      "name": "Stockfish",
      "depth": 18,
@@ -892,10 +892,10 @@
    ],
    "show_best": true,
    "numbers": false,
-   "text": "[Candidates: Ne7 91%, Nh6 6%, Be7 2%]",
+   "text": "[Position: Black to play] [Candidates: Ne7 91%, Nh6 6%, Be7 2%]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": false,
     "engine": null,
     "candidates": [
      [
@@ -1149,10 +1149,10 @@
    "candidates": [],
    "show_best": true,
    "numbers": false,
-   "text": "[Engine: Stockfish, depth 18 | eval +0.4 | best Bxe7 | line Bxe7 Kh8 | also Bh6 -0.1, Bf6 -0.2]",
+   "text": "[Position: White to play] [Engine: Stockfish, depth 18 | eval +0.4 | best Bxe7 | line Bxe7 Kh8 | also Bh6 -0.1, Bf6 -0.2]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": true,
     "engine": {
      "name": "Stockfish",
      "depth": 18,
@@ -1196,10 +1196,10 @@
    ],
    "show_best": true,
    "numbers": false,
-   "text": "[Candidates: Bxe7 91%, Bh6 6%, Bf6 2%]",
+   "text": "[Position: White to play] [Candidates: Bxe7 91%, Bh6 6%, Bf6 2%]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": true,
     "engine": null,
     "candidates": [
      [
@@ -1453,10 +1453,10 @@
    "candidates": [],
    "show_best": true,
    "numbers": false,
-   "text": "[Engine: Stockfish, depth 18 | eval +0.4 | best Nxe6 | line Nxe6 Rg8 | also Nxc6 -0.1, Nf5 -0.2]",
+   "text": "[Position: White to play] [Engine: Stockfish, depth 18 | eval +0.4 | best Nxe6 | line Nxe6 Rg8 | also Nxc6 -0.1, Nf5 -0.2]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": true,
     "engine": {
      "name": "Stockfish",
      "depth": 18,
@@ -1500,10 +1500,10 @@
    ],
    "show_best": true,
    "numbers": false,
-   "text": "[Candidates: Nxe6 91%, Nxc6 6%, Nf5 2%]",
+   "text": "[Position: White to play] [Candidates: Nxe6 91%, Nxc6 6%, Nf5 2%]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": true,
     "engine": null,
     "candidates": [
      [
@@ -1757,10 +1757,10 @@
    "candidates": [],
    "show_best": true,
    "numbers": false,
-   "text": "[Engine: Stockfish, depth 18 | eval +0.4 | best Nh6 | line Nh6 Rg8 | also Nf6+ -0.1, Ne5 -0.2]",
+   "text": "[Position: White to play] [Engine: Stockfish, depth 18 | eval +0.4 | best Nh6 | line Nh6 Rg8 | also Nf6+ -0.1, Ne5 -0.2]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": true,
     "engine": {
      "name": "Stockfish",
      "depth": 18,
@@ -1804,10 +1804,10 @@
    ],
    "show_best": true,
    "numbers": false,
-   "text": "[Candidates: Nh6 91%, Nf6+ 6%, Ne5 2%]",
+   "text": "[Position: White to play] [Candidates: Nh6 91%, Nf6+ 6%, Ne5 2%]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": true,
     "engine": null,
     "candidates": [
      [
@@ -2061,10 +2061,10 @@
    "candidates": [],
    "show_best": true,
    "numbers": false,
-   "text": "[Engine: Stockfish, depth 18 | eval +0.4 | best Rg8 | line Rg8 Kg2 | also Rg7 -0.1, Rg6 -0.2]",
+   "text": "[Position: Black to play] [Engine: Stockfish, depth 18 | eval +0.4 | best Rg8 | line Rg8 Kg2 | also Rg7 -0.1, Rg6 -0.2]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": false,
     "engine": {
      "name": "Stockfish",
      "depth": 18,
@@ -2108,10 +2108,10 @@
    ],
    "show_best": true,
    "numbers": false,
-   "text": "[Candidates: Rg8 91%, Rg7 6%, Rg6 2%]",
+   "text": "[Position: Black to play] [Candidates: Rg8 91%, Rg7 6%, Rg6 2%]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": false,
     "engine": null,
     "candidates": [
      [
@@ -2365,10 +2365,10 @@
    "candidates": [],
    "show_best": true,
    "numbers": false,
-   "text": "[Engine: Stockfish, depth 18 | eval +0.4 | best Kh8 | line Kh8 Nxg5 | also Kh7 -0.1, Kg7 -0.2]",
+   "text": "[Position: Black to play] [Engine: Stockfish, depth 18 | eval +0.4 | best Kh8 | line Kh8 Nxg5 | also Kh7 -0.1, Kg7 -0.2]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": false,
     "engine": {
      "name": "Stockfish",
      "depth": 18,
@@ -2412,10 +2412,10 @@
    ],
    "show_best": true,
    "numbers": false,
-   "text": "[Candidates: Kh8 91%, Kh7 6%, Kg7 2%]",
+   "text": "[Position: Black to play] [Candidates: Kh8 91%, Kh7 6%, Kg7 2%]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": false,
     "engine": null,
     "candidates": [
      [
@@ -2669,10 +2669,10 @@
    "candidates": [],
    "show_best": true,
    "numbers": false,
-   "text": "[Engine: Stockfish, depth 18 | eval +0.4 | best Kh8 | line Kh8 Qb8+ | also Kf8 -0.1, Kh7 -0.2]",
+   "text": "[Position: Black to play] [Engine: Stockfish, depth 18 | eval +0.4 | best Kh8 | line Kh8 Qb8+ | also Kf8 -0.1, Kh7 -0.2]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": false,
     "engine": {
      "name": "Stockfish",
      "depth": 18,
@@ -2716,10 +2716,10 @@
    ],
    "show_best": true,
    "numbers": false,
-   "text": "[Candidates: Kh8 91%, Kf8 6%, Kh7 2%]",
+   "text": "[Position: Black to play] [Candidates: Kh8 91%, Kf8 6%, Kh7 2%]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": false,
     "engine": null,
     "candidates": [
      [
@@ -2973,10 +2973,10 @@
    "candidates": [],
    "show_best": true,
    "numbers": false,
-   "text": "[Engine: Stockfish, depth 18 | eval +0.4 | best Nd7 | line Nd7 Kh8 | also Nb7 -0.1, Ne6 -0.2]",
+   "text": "[Position: White to play] [Engine: Stockfish, depth 18 | eval +0.4 | best Nd7 | line Nd7 Kh8 | also Nb7 -0.1, Ne6 -0.2]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": true,
     "engine": {
      "name": "Stockfish",
      "depth": 18,
@@ -3020,10 +3020,10 @@
    ],
    "show_best": true,
    "numbers": false,
-   "text": "[Candidates: Nd7 91%, Nb7 6%, Ne6 2%]",
+   "text": "[Position: White to play] [Candidates: Nd7 91%, Nb7 6%, Ne6 2%]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": true,
     "engine": null,
     "candidates": [
      [
@@ -3277,10 +3277,10 @@
    "candidates": [],
    "show_best": true,
    "numbers": false,
-   "text": "[Engine: Stockfish, depth 18 | eval +0.4 | best Kf8 | line Kf8 Ke6 | also Kd8 -0.1, Kf7 -0.2]",
+   "text": "[Position: Black to play] [Engine: Stockfish, depth 18 | eval +0.4 | best Kf8 | line Kf8 Ke6 | also Kd8 -0.1, Kf7 -0.2]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": false,
     "engine": {
      "name": "Stockfish",
      "depth": 18,
@@ -3324,10 +3324,10 @@
    ],
    "show_best": true,
    "numbers": false,
-   "text": "[Candidates: Kf8 91%, Kd8 6%, Kf7 2%]",
+   "text": "[Position: Black to play] [Candidates: Kf8 91%, Kd8 6%, Kf7 2%]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": false,
     "engine": null,
     "candidates": [
      [
@@ -3581,10 +3581,10 @@
    "candidates": [],
    "show_best": true,
    "numbers": false,
-   "text": "[Engine: Stockfish, depth 18 | eval +0.4 | best Kf8 | line Kf8 Ng5 | also Kd8 -0.1, Kd7 -0.2]",
+   "text": "[Position: Black to play] [Engine: Stockfish, depth 18 | eval +0.4 | best Kf8 | line Kf8 Ng5 | also Kd8 -0.1, Kd7 -0.2]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": false,
     "engine": {
      "name": "Stockfish",
      "depth": 18,
@@ -3628,10 +3628,10 @@
    ],
    "show_best": true,
    "numbers": false,
-   "text": "[Candidates: Kf8 91%, Kd8 6%, Kd7 2%]",
+   "text": "[Position: Black to play] [Candidates: Kf8 91%, Kd8 6%, Kd7 2%]",
    "parsed": {
     "move": null,
-    "white_to_play": null,
+    "white_to_play": false,
     "engine": null,
     "candidates": [
      [

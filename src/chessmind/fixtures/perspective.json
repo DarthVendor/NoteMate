@@ -1,0 +1,1042 @@
+{
+ "version": 1,
+ "anchor_template": "I'm playing {S}, and it's my move.",
+ "context": [
+  {
+   "fen": "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4",
+   "you": "white",
+   "note": true,
+   "numbers": true,
+   "engine": null,
+   "text": "[Position: move 4, White to play] [You: White]",
+   "parsed": {
+    "move": 4,
+    "white_to_play": true,
+    "you_white": true
+   }
+  },
+  {
+   "fen": "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4",
+   "you": "black",
+   "note": true,
+   "numbers": true,
+   "engine": null,
+   "text": "[Position: move 4, White to play] [You: Black]",
+   "parsed": {
+    "move": 4,
+    "white_to_play": true,
+    "you_white": false
+   }
+  },
+  {
+   "fen": "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4",
+   "you": "white",
+   "note": true,
+   "numbers": false,
+   "engine": null,
+   "text": "[Position: White to play] [You: White]",
+   "parsed": {
+    "move": null,
+    "white_to_play": true,
+    "you_white": true
+   }
+  },
+  {
+   "fen": "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4",
+   "you": null,
+   "note": true,
+   "numbers": false,
+   "engine": null,
+   "text": "[Position: White to play]",
+   "parsed": {
+    "move": null,
+    "white_to_play": true,
+    "you_white": null
+   }
+  },
+  {
+   "fen": "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4",
+   "you": "black",
+   "note": true,
+   "numbers": true,
+   "engine": {
+    "depth": 16,
+    "lines": [
+     {
+      "move": "b5c6",
+      "cp": 25,
+      "mate": null,
+      "pv": [
+       "b5c6"
+      ]
+     },
+     {
+      "move": "b5a6",
+      "cp": -10,
+      "mate": null,
+      "pv": [
+       "b5a6"
+      ]
+     }
+    ]
+   },
+   "text": "[Position: move 4, White to play] [You: Black] [Engine: Stockfish, depth 16 | eval +0.2 | best 4.Bxc6 | also 4.Bxa6 -0.1]",
+   "parsed": {
+    "move": 4,
+    "white_to_play": true,
+    "you_white": false
+   }
+  },
+  {
+   "fen": "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4",
+   "you": "black",
+   "note": true,
+   "numbers": false,
+   "engine": {
+    "depth": 16,
+    "lines": [
+     {
+      "move": "b5c6",
+      "cp": 25,
+      "mate": null,
+      "pv": [
+       "b5c6"
+      ]
+     },
+     {
+      "move": "b5a6",
+      "cp": -10,
+      "mate": null,
+      "pv": [
+       "b5a6"
+      ]
+     }
+    ]
+   },
+   "text": "[Position: White to play] [You: Black] [Engine: Stockfish, depth 16 | eval +0.2 | best Bxc6 | also Bxa6 -0.1]",
+   "parsed": {
+    "move": null,
+    "white_to_play": true,
+    "you_white": false
+   }
+  },
+  {
+   "fen": "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4",
+   "you": "white",
+   "note": false,
+   "numbers": true,
+   "engine": null,
+   "text": "[You: White]",
+   "parsed": {
+    "move": null,
+    "white_to_play": null,
+    "you_white": true
+   }
+  },
+  {
+   "fen": "rnbqk2r/ppppppbp/5np1/8/2PPP3/2N5/PP3PPP/R1BQKBNR b KQkq - 0 4",
+   "you": "white",
+   "note": true,
+   "numbers": true,
+   "engine": null,
+   "text": "[Position: move 4, Black to play] [You: White]",
+   "parsed": {
+    "move": 4,
+    "white_to_play": false,
+    "you_white": true
+   }
+  },
+  {
+   "fen": "rnbqk2r/ppppppbp/5np1/8/2PPP3/2N5/PP3PPP/R1BQKBNR b KQkq - 0 4",
+   "you": "black",
+   "note": true,
+   "numbers": true,
+   "engine": null,
+   "text": "[Position: move 4, Black to play] [You: Black]",
+   "parsed": {
+    "move": 4,
+    "white_to_play": false,
+    "you_white": false
+   }
+  },
+  {
+   "fen": "rnbqk2r/ppppppbp/5np1/8/2PPP3/2N5/PP3PPP/R1BQKBNR b KQkq - 0 4",
+   "you": "white",
+   "note": true,
+   "numbers": false,
+   "engine": null,
+   "text": "[Position: Black to play] [You: White]",
+   "parsed": {
+    "move": null,
+    "white_to_play": false,
+    "you_white": true
+   }
+  },
+  {
+   "fen": "rnbqk2r/ppppppbp/5np1/8/2PPP3/2N5/PP3PPP/R1BQKBNR b KQkq - 0 4",
+   "you": null,
+   "note": true,
+   "numbers": false,
+   "engine": null,
+   "text": "[Position: Black to play]",
+   "parsed": {
+    "move": null,
+    "white_to_play": false,
+    "you_white": null
+   }
+  },
+  {
+   "fen": "rnbqk2r/ppppppbp/5np1/8/2PPP3/2N5/PP3PPP/R1BQKBNR b KQkq - 0 4",
+   "you": "black",
+   "note": true,
+   "numbers": true,
+   "engine": {
+    "depth": 16,
+    "lines": [
+     {
+      "move": "h8g8",
+      "cp": 25,
+      "mate": null,
+      "pv": [
+       "h8g8"
+      ]
+     },
+     {
+      "move": "h8f8",
+      "cp": -10,
+      "mate": null,
+      "pv": [
+       "h8f8"
+      ]
+     }
+    ]
+   },
+   "text": "[Position: move 4, Black to play] [You: Black] [Engine: Stockfish, depth 16 | eval +0.2 | best 4...Rg8 | also 4...Rf8 -0.1]",
+   "parsed": {
+    "move": 4,
+    "white_to_play": false,
+    "you_white": false
+   }
+  },
+  {
+   "fen": "rnbqk2r/ppppppbp/5np1/8/2PPP3/2N5/PP3PPP/R1BQKBNR b KQkq - 0 4",
+   "you": "black",
+   "note": true,
+   "numbers": false,
+   "engine": {
+    "depth": 16,
+    "lines": [
+     {
+      "move": "h8g8",
+      "cp": 25,
+      "mate": null,
+      "pv": [
+       "h8g8"
+      ]
+     },
+     {
+      "move": "h8f8",
+      "cp": -10,
+      "mate": null,
+      "pv": [
+       "h8f8"
+      ]
+     }
+    ]
+   },
+   "text": "[Position: Black to play] [You: Black] [Engine: Stockfish, depth 16 | eval +0.2 | best Rg8 | also Rf8 -0.1]",
+   "parsed": {
+    "move": null,
+    "white_to_play": false,
+    "you_white": false
+   }
+  },
+  {
+   "fen": "rnbqk2r/ppppppbp/5np1/8/2PPP3/2N5/PP3PPP/R1BQKBNR b KQkq - 0 4",
+   "you": "white",
+   "note": false,
+   "numbers": true,
+   "engine": null,
+   "text": "[You: White]",
+   "parsed": {
+    "move": null,
+    "white_to_play": null,
+    "you_white": true
+   }
+  },
+  {
+   "fen": "rnbqkb1r/1p2pppp/p2p1n2/8/3NP3/2N1B3/PPP2PPP/R2QKB1R b KQkq - 1 6",
+   "you": "white",
+   "note": true,
+   "numbers": true,
+   "engine": null,
+   "text": "[Position: move 6, Black to play] [You: White]",
+   "parsed": {
+    "move": 6,
+    "white_to_play": false,
+    "you_white": true
+   }
+  },
+  {
+   "fen": "rnbqkb1r/1p2pppp/p2p1n2/8/3NP3/2N1B3/PPP2PPP/R2QKB1R b KQkq - 1 6",
+   "you": "black",
+   "note": true,
+   "numbers": true,
+   "engine": null,
+   "text": "[Position: move 6, Black to play] [You: Black]",
+   "parsed": {
+    "move": 6,
+    "white_to_play": false,
+    "you_white": false
+   }
+  },
+  {
+   "fen": "rnbqkb1r/1p2pppp/p2p1n2/8/3NP3/2N1B3/PPP2PPP/R2QKB1R b KQkq - 1 6",
+   "you": "white",
+   "note": true,
+   "numbers": false,
+   "engine": null,
+   "text": "[Position: Black to play] [You: White]",
+   "parsed": {
+    "move": null,
+    "white_to_play": false,
+    "you_white": true
+   }
+  },
+  {
+   "fen": "rnbqkb1r/1p2pppp/p2p1n2/8/3NP3/2N1B3/PPP2PPP/R2QKB1R b KQkq - 1 6",
+   "you": null,
+   "note": true,
+   "numbers": false,
+   "engine": null,
+   "text": "[Position: Black to play]",
+   "parsed": {
+    "move": null,
+    "white_to_play": false,
+    "you_white": null
+   }
+  },
+  {
+   "fen": "rnbqkb1r/1p2pppp/p2p1n2/8/3NP3/2N1B3/PPP2PPP/R2QKB1R b KQkq - 1 6",
+   "you": "black",
+   "note": true,
+   "numbers": true,
+   "engine": {
+    "depth": 16,
+    "lines": [
+     {
+      "move": "h8g8",
+      "cp": 25,
+      "mate": null,
+      "pv": [
+       "h8g8"
+      ]
+     },
+     {
+      "move": "e8d7",
+      "cp": -10,
+      "mate": null,
+      "pv": [
+       "e8d7"
+      ]
+     }
+    ]
+   },
+   "text": "[Position: move 6, Black to play] [You: Black] [Engine: Stockfish, depth 16 | eval +0.2 | best 6...Rg8 | also 6...Kd7 -0.1]",
+   "parsed": {
+    "move": 6,
+    "white_to_play": false,
+    "you_white": false
+   }
+  },
+  {
+   "fen": "rnbqkb1r/1p2pppp/p2p1n2/8/3NP3/2N1B3/PPP2PPP/R2QKB1R b KQkq - 1 6",
+   "you": "black",
+   "note": true,
+   "numbers": false,
+   "engine": {
+    "depth": 16,
+    "lines": [
+     {
+      "move": "h8g8",
+      "cp": 25,
+      "mate": null,
+      "pv": [
+       "h8g8"
+      ]
+     },
+     {
+      "move": "e8d7",
+      "cp": -10,
+      "mate": null,
+      "pv": [
+       "e8d7"
+      ]
+     }
+    ]
+   },
+   "text": "[Position: Black to play] [You: Black] [Engine: Stockfish, depth 16 | eval +0.2 | best Rg8 | also Kd7 -0.1]",
+   "parsed": {
+    "move": null,
+    "white_to_play": false,
+    "you_white": false
+   }
+  },
+  {
+   "fen": "rnbqkb1r/1p2pppp/p2p1n2/8/3NP3/2N1B3/PPP2PPP/R2QKB1R b KQkq - 1 6",
+   "you": "white",
+   "note": false,
+   "numbers": true,
+   "engine": null,
+   "text": "[You: White]",
+   "parsed": {
+    "move": null,
+    "white_to_play": null,
+    "you_white": true
+   }
+  },
+  {
+   "fen": "8/8/2p5/p1PkP1r1/Pp1PppP1/1P6/5K2/6R1 b - - 0 41",
+   "you": "white",
+   "note": true,
+   "numbers": true,
+   "engine": null,
+   "text": "[Position: move 41, Black to play] [You: White]",
+   "parsed": {
+    "move": 41,
+    "white_to_play": false,
+    "you_white": true
+   }
+  },
+  {
+   "fen": "8/8/2p5/p1PkP1r1/Pp1PppP1/1P6/5K2/6R1 b - - 0 41",
+   "you": "black",
+   "note": true,
+   "numbers": true,
+   "engine": null,
+   "text": "[Position: move 41, Black to play] [You: Black]",
+   "parsed": {
+    "move": 41,
+    "white_to_play": false,
+    "you_white": false
+   }
+  },
+  {
+   "fen": "8/8/2p5/p1PkP1r1/Pp1PppP1/1P6/5K2/6R1 b - - 0 41",
+   "you": "white",
+   "note": true,
+   "numbers": false,
+   "engine": null,
+   "text": "[Position: Black to play] [You: White]",
+   "parsed": {
+    "move": null,
+    "white_to_play": false,
+    "you_white": true
+   }
+  },
+  {
+   "fen": "8/8/2p5/p1PkP1r1/Pp1PppP1/1P6/5K2/6R1 b - - 0 41",
+   "you": null,
+   "note": true,
+   "numbers": false,
+   "engine": null,
+   "text": "[Position: Black to play]",
+   "parsed": {
+    "move": null,
+    "white_to_play": false,
+    "you_white": null
+   }
+  },
+  {
+   "fen": "8/8/2p5/p1PkP1r1/Pp1PppP1/1P6/5K2/6R1 b - - 0 41",
+   "you": "black",
+   "note": true,
+   "numbers": true,
+   "engine": {
+    "depth": 16,
+    "lines": [
+     {
+      "move": "g5g8",
+      "cp": 25,
+      "mate": null,
+      "pv": [
+       "g5g8"
+      ]
+     },
+     {
+      "move": "g5g7",
+      "cp": -10,
+      "mate": null,
+      "pv": [
+       "g5g7"
+      ]
+     }
+    ]
+   },
+   "text": "[Position: move 41, Black to play] [You: Black] [Engine: Stockfish, depth 16 | eval +0.2 | best 41...Rg8 | also 41...Rg7 -0.1]",
+   "parsed": {
+    "move": 41,
+    "white_to_play": false,
+    "you_white": false
+   }
+  },
+  {
+   "fen": "8/8/2p5/p1PkP1r1/Pp1PppP1/1P6/5K2/6R1 b - - 0 41",
+   "you": "black",
+   "note": true,
+   "numbers": false,
+   "engine": {
+    "depth": 16,
+    "lines": [
+     {
+      "move": "g5g8",
+      "cp": 25,
+      "mate": null,
+      "pv": [
+       "g5g8"
+      ]
+     },
+     {
+      "move": "g5g7",
+      "cp": -10,
+      "mate": null,
+      "pv": [
+       "g5g7"
+      ]
+     }
+    ]
+   },
+   "text": "[Position: Black to play] [You: Black] [Engine: Stockfish, depth 16 | eval +0.2 | best Rg8 | also Rg7 -0.1]",
+   "parsed": {
+    "move": null,
+    "white_to_play": false,
+    "you_white": false
+   }
+  },
+  {
+   "fen": "8/8/2p5/p1PkP1r1/Pp1PppP1/1P6/5K2/6R1 b - - 0 41",
+   "you": "white",
+   "note": false,
+   "numbers": true,
+   "engine": null,
+   "text": "[You: White]",
+   "parsed": {
+    "move": null,
+    "white_to_play": null,
+    "you_white": true
+   }
+  },
+  {
+   "fen": "5rk1/3R1ppp/8/1p6/8/1P3pPP/2P2P2/6K1 w - - 0 1",
+   "you": "white",
+   "note": true,
+   "numbers": true,
+   "engine": null,
+   "text": "[Position: move 1, White to play] [You: White]",
+   "parsed": {
+    "move": 1,
+    "white_to_play": true,
+    "you_white": true
+   }
+  },
+  {
+   "fen": "5rk1/3R1ppp/8/1p6/8/1P3pPP/2P2P2/6K1 w - - 0 1",
+   "you": "black",
+   "note": true,
+   "numbers": true,
+   "engine": null,
+   "text": "[Position: move 1, White to play] [You: Black]",
+   "parsed": {
+    "move": 1,
+    "white_to_play": true,
+    "you_white": false
+   }
+  },
+  {
+   "fen": "5rk1/3R1ppp/8/1p6/8/1P3pPP/2P2P2/6K1 w - - 0 1",
+   "you": "white",
+   "note": true,
+   "numbers": false,
+   "engine": null,
+   "text": "[Position: White to play] [You: White]",
+   "parsed": {
+    "move": null,
+    "white_to_play": true,
+    "you_white": true
+   }
+  },
+  {
+   "fen": "5rk1/3R1ppp/8/1p6/8/1P3pPP/2P2P2/6K1 w - - 0 1",
+   "you": null,
+   "note": true,
+   "numbers": false,
+   "engine": null,
+   "text": "[Position: White to play]",
+   "parsed": {
+    "move": null,
+    "white_to_play": true,
+    "you_white": null
+   }
+  },
+  {
+   "fen": "5rk1/3R1ppp/8/1p6/8/1P3pPP/2P2P2/6K1 w - - 0 1",
+   "you": "black",
+   "note": true,
+   "numbers": true,
+   "engine": {
+    "depth": 16,
+    "lines": [
+     {
+      "move": "d7d8",
+      "cp": 25,
+      "mate": null,
+      "pv": [
+       "d7d8"
+      ]
+     },
+     {
+      "move": "d7f7",
+      "cp": -10,
+      "mate": null,
+      "pv": [
+       "d7f7"
+      ]
+     }
+    ]
+   },
+   "text": "[Position: move 1, White to play] [You: Black] [Engine: Stockfish, depth 16 | eval +0.2 | best 1.Rd8 | also 1.Rxf7 -0.1]",
+   "parsed": {
+    "move": 1,
+    "white_to_play": true,
+    "you_white": false
+   }
+  },
+  {
+   "fen": "5rk1/3R1ppp/8/1p6/8/1P3pPP/2P2P2/6K1 w - - 0 1",
+   "you": "black",
+   "note": true,
+   "numbers": false,
+   "engine": {
+    "depth": 16,
+    "lines": [
+     {
+      "move": "d7d8",
+      "cp": 25,
+      "mate": null,
+      "pv": [
+       "d7d8"
+      ]
+     },
+     {
+      "move": "d7f7",
+      "cp": -10,
+      "mate": null,
+      "pv": [
+       "d7f7"
+      ]
+     }
+    ]
+   },
+   "text": "[Position: White to play] [You: Black] [Engine: Stockfish, depth 16 | eval +0.2 | best Rd8 | also Rxf7 -0.1]",
+   "parsed": {
+    "move": null,
+    "white_to_play": true,
+    "you_white": false
+   }
+  },
+  {
+   "fen": "5rk1/3R1ppp/8/1p6/8/1P3pPP/2P2P2/6K1 w - - 0 1",
+   "you": "white",
+   "note": false,
+   "numbers": true,
+   "engine": null,
+   "text": "[You: White]",
+   "parsed": {
+    "move": null,
+    "white_to_play": null,
+    "you_white": true
+   }
+  }
+ ],
+ "anchors": {
+  "white": {
+   "text": "I'm playing White, and it's my move.",
+   "ids": [
+    2368,
+    3315,
+    3300,
+    2614,
+    2075,
+    2348,
+    2405,
+    2531,
+    2619,
+    2567,
+    2077
+   ]
+  },
+  "black": {
+   "text": "I'm playing Black, and it's my move.",
+   "ids": [
+    2368,
+    3315,
+    3300,
+    2620,
+    2075,
+    2348,
+    2405,
+    2531,
+    2619,
+    2567,
+    2077
+   ]
+  }
+ },
+ "walks": [
+  {
+   "moves": [
+    "e2e4",
+    "e7e5",
+    "g1f3",
+    "b8c6",
+    "f1b5",
+    "a7a6"
+   ],
+   "anchor": [
+    2368,
+    3315,
+    3300,
+    2614,
+    2075,
+    2348,
+    2405,
+    2531,
+    2619,
+    2567,
+    2077
+   ],
+   "steps": [
+    {
+     "allowed": [
+      6
+     ],
+     "phase": "start",
+     "feed": 6
+    },
+    {
+     "allowed": [
+      13
+     ],
+     "phase": "side",
+     "feed": 13
+    },
+    {
+     "allowed": [
+      2368
+     ],
+     "phase": "think",
+     "feed": 2368
+    },
+    {
+     "allowed": [
+      3315
+     ],
+     "phase": "think",
+     "feed": 3315
+    },
+    {
+     "allowed": [
+      3300
+     ],
+     "phase": "think",
+     "feed": 3300
+    },
+    {
+     "allowed": [
+      2614
+     ],
+     "phase": "think",
+     "feed": 2614
+    },
+    {
+     "allowed": [
+      2075
+     ],
+     "phase": "think",
+     "feed": 2075
+    },
+    {
+     "allowed": [
+      2348
+     ],
+     "phase": "think",
+     "feed": 2348
+    },
+    {
+     "allowed": [
+      2405
+     ],
+     "phase": "think",
+     "feed": 2405
+    },
+    {
+     "allowed": [
+      2531
+     ],
+     "phase": "think",
+     "feed": 2531
+    },
+    {
+     "allowed": [
+      2619
+     ],
+     "phase": "think",
+     "feed": 2619
+    },
+    {
+     "allowed": [
+      2567
+     ],
+     "phase": "think",
+     "feed": 2567
+    },
+    {
+     "allowed": [
+      2077
+     ],
+     "phase": "think",
+     "feed": 2077
+    },
+    {
+     "allowed": "TEXT",
+     "phase": "think",
+     "feed": 2284
+    },
+    {
+     "allowed": "TEXT",
+     "phase": "think",
+     "feed": 8887
+    },
+    {
+     "allowed": "TEXT",
+     "phase": "think",
+     "feed": 2077
+    },
+    {
+     "allowed": "TEXT",
+     "phase": "think",
+     "feed": 18448
+    },
+    {
+     "allowed": [
+      53,
+      55,
+      101,
+      120,
+      121,
+      125,
+      195,
+      196,
+      231,
+      234,
+      269,
+      273,
+      310,
+      315,
+      351,
+      356,
+      473,
+      477,
+      507,
+      510,
+      675,
+      689,
+      693,
+      695,
+      697,
+      1029,
+      1031,
+      1035,
+      1036,
+      1038,
+      1047,
+      1049
+     ],
+     "phase": "move",
+     "feed": 1049
+    }
+   ],
+   "final_phase": "done"
+  },
+  {
+   "moves": [
+    "d2d4",
+    "g8f6",
+    "c2c4",
+    "g7g6",
+    "b1c3",
+    "f8g7",
+    "e2e4"
+   ],
+   "anchor": [
+    2368,
+    3315,
+    3300,
+    2620,
+    2075,
+    2348,
+    2405,
+    2531,
+    2619,
+    2567,
+    2077
+   ],
+   "steps": [
+    {
+     "allowed": [
+      6
+     ],
+     "phase": "start",
+     "feed": 6
+    },
+    {
+     "allowed": [
+      14
+     ],
+     "phase": "side",
+     "feed": 14
+    },
+    {
+     "allowed": [
+      2368
+     ],
+     "phase": "think",
+     "feed": 2368
+    },
+    {
+     "allowed": [
+      3315
+     ],
+     "phase": "think",
+     "feed": 3315
+    },
+    {
+     "allowed": [
+      3300
+     ],
+     "phase": "think",
+     "feed": 3300
+    },
+    {
+     "allowed": [
+      2620
+     ],
+     "phase": "think",
+     "feed": 2620
+    },
+    {
+     "allowed": [
+      2075
+     ],
+     "phase": "think",
+     "feed": 2075
+    },
+    {
+     "allowed": [
+      2348
+     ],
+     "phase": "think",
+     "feed": 2348
+    },
+    {
+     "allowed": [
+      2405
+     ],
+     "phase": "think",
+     "feed": 2405
+    },
+    {
+     "allowed": [
+      2531
+     ],
+     "phase": "think",
+     "feed": 2531
+    },
+    {
+     "allowed": [
+      2619
+     ],
+     "phase": "think",
+     "feed": 2619
+    },
+    {
+     "allowed": [
+      2567
+     ],
+     "phase": "think",
+     "feed": 2567
+    },
+    {
+     "allowed": [
+      2077
+     ],
+     "phase": "think",
+     "feed": 2077
+    },
+    {
+     "allowed": "TEXT",
+     "phase": "think",
+     "feed": 2284
+    },
+    {
+     "allowed": "TEXT",
+     "phase": "think",
+     "feed": 8887
+    },
+    {
+     "allowed": "TEXT",
+     "phase": "think",
+     "feed": 2077
+    },
+    {
+     "allowed": "TEXT",
+     "phase": "think",
+     "feed": 18448
+    },
+    {
+     "allowed": [
+      1407,
+      1409,
+      1411,
+      1415,
+      1431,
+      1445,
+      1495,
+      1498,
+      1528,
+      1532,
+      1567,
+      1572,
+      1608,
+      1613,
+      1649,
+      1654,
+      1737,
+      1746,
+      1771,
+      1774,
+      1825,
+      1827,
+      1912,
+      1913,
+      1985,
+      1986
+     ],
+     "phase": "move",
+     "feed": 1986
+    }
+   ],
+   "final_phase": "done"
+  }
+ ]
+}

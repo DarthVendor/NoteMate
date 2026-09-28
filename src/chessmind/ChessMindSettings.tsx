@@ -71,6 +71,15 @@ export function ChessMindSettings({ cm }: { cm: ChessMindState }) {
               </span>
             </label>
           )}
+          {info?.thinking && (
+            <label className="check-row">
+              <span className="check-text">
+                <span>Anchor game thinks</span>
+                <span className="field-hint">When ChessMind thinks before a move (Simulate), its think opens with "I'm playing White, and it's my move." (its side), as every training think does.</span>
+              </span>
+              <input type="checkbox" checked={settings.thinkAnchor} onChange={(e) => update({ thinkAnchor: e.target.checked })} data-testid="chessmind-think-anchor" />
+            </label>
+          )}
           <label className="field">
             <span className="field-label">
               Text temperature <span className="mono faint">{settings.temperature.toFixed(2)}</span>
@@ -136,6 +145,16 @@ export function ChessMindSettings({ cm }: { cm: ChessMindState }) {
               </span>
             </label>
           )}
+          <label className="field">
+            <span className="field-label">I'm playing</span>
+            <select className="select" value={settings.userSide} onChange={(e) => update({ userSide: e.target.value as typeof settings.userSide })} data-testid="chessmind-user-side">
+              <option value="auto">Auto (board orientation; in Simulate, ChessMind's opponent)</option>
+              <option value="white">White</option>
+              <option value="black">Black</option>
+              <option value="off">Don't say</option>
+            </select>
+            <span className="field-hint">Sent with each question as [You: White] so answers say "you" for your side and "your opponent" for the other, even when it is not your move.</span>
+          </label>
           <label className="check-row">
             <span className="check-text">
               <span>Send the model's top moves</span>

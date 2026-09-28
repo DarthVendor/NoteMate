@@ -143,6 +143,9 @@ export type ToWorker =
       lineRules?: { endP?: Partial<LineRules['endP']>; maxPlies?: Partial<LineRules['maxPlies']>; stopFinished?: boolean };
       /** Seeds the sampling RNG for this pick; unset = Math.random. */
       seed?: number;
+      /** Open the think with the teacher-forced perspective anchor "I'm playing White, and it's my move." (the side
+       * to move; thinkMove.ts anchorIds, ChessMind play_move_with_think(anchor=True)). Default true. */
+      anchor?: boolean;
     };
 
 /** Why a generated line ended: its <|end_line|> was the only choice (length cap or finished position), P(end) reached

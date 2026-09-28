@@ -6,12 +6,15 @@
  *
  * with no <|move|> after <|end_think|>: the next token is the game move. The mask at every step:
  *   - first token: think true -> <|think|> only; null (auto) -> <|think|> or a legal move; false -> a legal move;
- *   - after <|think|>: the side-to-move token (forced);
+ *   - after <|think|>: the side-to-move token (forced), then (`anchorIds`) the perspective anchor, teacher-forced one
+ *     id at a time: "I'm playing White, and it's my move." (anchorIds(); every training think opens with the player's
+ *     side, ChessMind chessmind.data.perspective.GAME_ANCHOR). The forced ids count as think tokens;
  *   - in the think: text, <|line|> and <|end_think|> (no <|fen|>: in-game lines always start from the game position;
  *     no <|eos|>, no <|move|>); inside a line the LineWalker masks (legal moves, branches, forced markers) with the
  *     think cap of LineRules; after `maxThinkTokens` think tokens the line (if open) and then the think are closed;
  *   - after <|end_think|>: a legal move of the game position; after the move, <|eos|> (generation stops).
- * Parity: scripts/test-think-move.mjs against fixtures/think-move.json (ChessMind's scripts/think_move_fixture.py).
+ * Parity: scripts/test-think-move.mjs against fixtures/think-move.json (ChessMind's scripts/think_move_fixture.py); the
+ * anchor: scripts/test-perspective.mjs against fixtures/perspective.json (ChessMind's scripts/perspective_fixture.py).
  */
 import { Chess } from 'chess.js';
 import type { ChessTokenizer } from './tokenizer';
@@ -21,6 +24,19 @@ import type { GenConstraint } from './constraint';
 import { DEFAULT_THINK_MOVE_TOKENS } from './protocol.ts';
 
 export type ThinkMovePhase = 'start' | 'side' | 'think' | 'move' | 'done';
+
+/** The in-game think's perspective anchor (ChessMind chessmind.data.perspective.GAME_ANCHOR, the canonical form). */
+export const GAME_ANCHOR = "I'm playing {S}, and it's my move.";
+
+export function anchorText(white: boolean): string {
+  return GAME_ANCHOR.replace('{S}', white ? 'White' : 'Black');
+}
+
+/** Text ids of the anchor for the player of `white` (ChessMind think_move.anchor_ids: encoded as the first text part
+ * of a training think is). */
+export function anchorIds(t: ChessTokenizer, white: boolean): number[] {
+  return t.encodeText(anchorText(white));
+}
 
 export class ThinkMoveConstraint implements GenConstraint {
   readonly think: boolean | null;
@@ -39,10 +55,15 @@ export class ThinkMoveConstraint implements GenConstraint {
   private walker: LineWalker | null = null;
   private line: LineWatch | null = null;
   private seen = 0;
+  private readonly anchor: number[];
+  /** The anchor ids still to force (after the side token). */
+  private forced: number[] = [];
 
-  /** `fen`: the game position (undefined = the initial position). Tokenizers without <|end_think|> never think. */
-  constructor(t: ChessTokenizer, fen: string | undefined, think: boolean | null = true, maxThinkTokens: number | null = DEFAULT_THINK_MOVE_TOKENS, rules: LineRules = DEFAULT_LINE_RULES) {
+  /** `fen`: the game position (undefined = the initial position). Tokenizers without <|end_think|> never think.
+   * `anchorIds`: forced right after the side token (anchorIds(t, side to move is White)); null = none. */
+  constructor(t: ChessTokenizer, fen: string | undefined, think: boolean | null = true, maxThinkTokens: number | null = DEFAULT_THINK_MOVE_TOKENS, rules: LineRules = DEFAULT_LINE_RULES, anchorIds: number[] | null = null) {
     this.t = t;
+    this.anchor = [...(anchorIds ?? [])];
     this.fen = fen;
     const endThink = t.endThinkId;
     this.think = endThink === null ? false : think;
@@ -80,9 +101,14 @@ export class ThinkMoveConstraint implements GenConstraint {
       case 'side':
         this.phase = 'think';
         this.thinkTokens = 1;
+        this.forced = [...this.anchor];
         return;
       case 'think':
         this.thinkTokens++;
+        if (this.forced.length) {
+          this.forced.shift();
+          return;
+        }
         if (this.inLine) {
           if (id === t.endLineId) {
             this.walker = null;
@@ -122,6 +148,7 @@ export class ThinkMoveConstraint implements GenConstraint {
       case 'side':
         return [this.sideId];
       case 'think': {
+        if (this.forced.length) return [this.forced[0]];
         const over = this.maxThinkTokens !== null && this.thinkTokens >= this.maxThinkTokens;
         const max = this.rules.maxPlies.think;
         if (this.walker) return this.walker.allowed(over || this.walker.plies >= max);

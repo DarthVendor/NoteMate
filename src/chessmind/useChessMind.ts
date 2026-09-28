@@ -5,6 +5,7 @@ import { splitThink, type DialogueTurn } from './tokenizer';
 import type { ChatMessage } from '../types';
 import { DEFAULT_LINE_RULES } from './lineRules';
 import type { GameAction } from '../state/gameReducer';
+import type { UserSideSetting } from './chatContext';
 import { newId } from '../state/pgn';
 import { OFFERED_TOOLS, TOOL_SPECS, errorText } from './tools';
 import type { RunTool } from './useChessMindTools';
@@ -54,6 +55,12 @@ export interface ChessMindSettings {
   /** Tool calling (models whose tokenizer has the tool tokens; tools.ts): 'on' offers the engine tool (the model
    * decides when to call it), 'force' also forces its first call (a demo for models not trained with tools). */
   tools: 'off' | 'on' | 'force';
+  /** "I'm playing": the user's side sent with chat questions as `[You: White|Black]` (chatContext.ts userSide: 'auto' =
+   * Simulate's non-model colour during a Simulate game, else the board orientation; 'off' = no block). */
+  userSide: UserSideSetting;
+  /** Think-then-move picks open the think with the perspective anchor "I'm playing White, and it's my move."
+   * (teacher-forced, as every training think opens; thinkMove.ts anchorIds). */
+  thinkAnchor: boolean;
 }
 
 export interface PickResult {
@@ -83,7 +90,7 @@ const STORAGE_KEY = 'notemate.chessmind.v1';
 const SETTINGS_VERSION = 2;
 /** Plies of history the simulator gives a board-embedding model (see pick). */
 const SIM_CONTEXT_PLIES = 16;
-const DEFAULTS: ChessMindSettings = { enabled: false, modelId: '', backend: 'auto', arrows: true, aboutPosition: false, sendMoves: true, contextPlies: 'full', think: 'auto', temperature: 0.8, lineEndAnswer: DEFAULT_LINE_RULES.endP.answer, lineEndThink: DEFAULT_LINE_RULES.endP.think, maxLinePliesAnswer: DEFAULT_LINE_RULES.maxPlies.answer, maxLinePliesThink: DEFAULT_LINE_RULES.maxPlies.think, engineContext: true, candidatesContext: true, checkClaims: true, tools: 'off' };
+const DEFAULTS: ChessMindSettings = { enabled: false, modelId: '', backend: 'auto', arrows: true, aboutPosition: false, sendMoves: true, contextPlies: 'full', think: 'auto', temperature: 0.8, lineEndAnswer: DEFAULT_LINE_RULES.endP.answer, lineEndThink: DEFAULT_LINE_RULES.endP.think, maxLinePliesAnswer: DEFAULT_LINE_RULES.maxPlies.answer, maxLinePliesThink: DEFAULT_LINE_RULES.maxPlies.think, engineContext: true, candidatesContext: true, checkClaims: true, tools: 'off', userSide: 'auto', thinkAnchor: true };
 /** Earlier chat turns (user + assistant messages) sent with a question, so follow-ups like "no, the other one"
  * have their context. The KV cache makes the extra prompt a one-off prefill; the worker trims the think budget
  * (and drops the oldest turns) to fit the context. */
@@ -319,12 +326,12 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
           temperature,
           contextPlies: simContext,
           ...(think
-            ? { think, maxThinkTokens: opts.maxThinkTokens, lineTemperature: DEFAULT_LINE_TEMPERATURE, lineRules: { endP: { think: settings.lineEndThink }, maxPlies: { think: settings.maxLinePliesThink } } }
+            ? { think, anchor: settings.thinkAnchor, maxThinkTokens: opts.maxThinkTokens, lineTemperature: DEFAULT_LINE_TEMPERATURE, lineRules: { endP: { think: settings.lineEndThink }, maxPlies: { think: settings.maxLinePliesThink } } }
             : {}),
         } satisfies ToWorker);
       });
     },
-    [status, contextPlies, info?.manifest.boards, settings.lineEndThink, settings.maxLinePliesThink],
+    [status, contextPlies, info?.manifest.boards, settings.lineEndThink, settings.maxLinePliesThink, settings.thinkAnchor],
   );
 
   /** Stop the running picks (a think pick answers with no move). */

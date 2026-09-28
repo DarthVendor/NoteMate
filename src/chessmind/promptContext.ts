@@ -3,7 +3,12 @@
  * fixtures/prompt_context.json by scripts/test-context.mjs). One text part, the last of the user turn, made of
  * bracketed blocks in a fixed order:
  *
- *   [Position: move 12, White to play] [Engine: Stockfish, depth 20 | eval +0.4 | best 12.Nf3 | line 12.Nf3 Nc6 13.d4 exd4 | also 12.d4 +0.2, 12.h3 +0.1] [Candidates: 12.Nd5 93%, 12.Bxf6 6%]
+ *   [Position: move 12, White to play] [You: Black] [Engine: Stockfish, depth 20 | eval +0.4 | best 12.Nf3 | line 12.Nf3 Nc6 13.d4 exd4 | also 12.d4 +0.2, 12.h3 +0.1] [Candidates: 12.Nd5 93%, 12.Bxf6 6%]
+ *
+ * [Position: White to play] (no move number) when the move number is unknown (numbers=false). [You: White|Black] is
+ * the user's side (chatContext.ts: userSide), which may be the side NOT to move; answers then say "you" / "your" for
+ * it and "your opponent" for the other side (ChessMind chessmind/data/perspective.py). Parity of the [You] block and
+ * the side-only note: scripts/test-perspective.mjs against fixtures/perspective.json.
  *
  * The model sees the board but not the move number, an engine or its own policy; without these blocks it learned to
  * invent evaluations ("Evaluation: +0.4") and move numbers. Evaluations are from White's point of view.
@@ -83,10 +88,21 @@ export function numberedSan(fen: string, moves: string[], maxPlies?: number, num
   return words.join(' ');
 }
 
-/** `[Position: move 12, White to play]`. */
-export function positionNote(fen: string): string {
+export type ContextSide = 'white' | 'black';
+
+const sideWord = (white: boolean) => (white ? 'White' : 'Black');
+
+/** `[Position: move 12, White to play]`; numbers=false (the move number is unknown, e.g. an EPD snapshot):
+ * `[Position: White to play]` -- the side to move is always stated. */
+export function positionNote(fen: string, numbers = true): string {
   const b = new Chess(fen);
-  return `[Position: move ${b.moveNumber()}, ${b.turn() === 'w' ? 'White' : 'Black'} to play]`;
+  const side = sideWord(b.turn() === 'w');
+  return numbers ? `[Position: move ${b.moveNumber()}, ${side} to play]` : `[Position: ${side} to play]`;
+}
+
+/** `[You: White]`: the side the user plays / is being advised as. It may differ from the side to move. */
+export function youBlock(side: ContextSide | boolean): string {
+  return `[You: ${sideWord(side === true || side === 'white')}]`;
 }
 
 export interface EngineBlockOptions {
@@ -137,14 +153,17 @@ export interface ContextOptions extends EngineBlockOptions {
   note?: boolean;
   engine?: ContextEngineInfo | null;
   candidates?: [string, number][] | null;
+  /** The user's side -> `[You: White|Black]` right after the position note (null / undefined: no block). */
+  you?: ContextSide | boolean | null;
 }
 
-/** The user turn's context part: the blocks that apply, space separated ('' when none). numbers=false: no position
- * note, moves without numbers (training only; NoteMate always knows the move number). */
+/** The user turn's context part: the blocks that apply, space separated ('' when none). numbers=false: the side-only
+ * position note, moves without numbers (training only; NoteMate always knows the move number). */
 export function contextText(fen: string, o: ContextOptions = {}): string {
-  const { note = true, engine, candidates, numbers = true } = o;
+  const { note = true, engine, candidates, numbers = true, you } = o;
   const blocks: string[] = [];
-  if (note && numbers) blocks.push(positionNote(fen));
+  if (note) blocks.push(positionNote(fen, numbers));
+  if (you !== undefined && you !== null) blocks.push(youBlock(you));
   if (engine) blocks.push(engineBlock(fen, engine, o));
   if (candidates?.length) blocks.push(candidatesBlock(fen, candidates, MAX_CANDIDATES, numbers));
   return blocks.filter(Boolean).join(' ');
@@ -164,21 +183,26 @@ export interface ParsedContext {
   move: number | null;
   white_to_play: boolean | null;
   engine: ParsedEngine | null;
+  /** [You: White|Black]: the user's side (true = White). */
+  you_white: boolean | null;
   candidates: [string, number][];
 }
 
-const BLOCK_RE = /\[(Position|Engine|Candidates): ([^[\]]*)\]/g;
+const BLOCK_RE = /\[(Position|You|Engine|Candidates): ([^[\]]*)\]/g;
 
 /** Read the blocks of contextText out of any text (missing blocks stay empty). */
 export function parseContext(text: string | null | undefined): ParsedContext {
-  const out: ParsedContext = { move: null, white_to_play: null, engine: null, candidates: [] };
+  const out: ParsedContext = { move: null, white_to_play: null, engine: null, you_white: null, candidates: [] };
   for (const [, kind, body] of (text ?? '').matchAll(BLOCK_RE)) {
     if (kind === 'Position') {
-      const m = /^move (\d+), (White|Black) to play$/.exec(body.trim());
+      const m = /^(?:move (\d+), )?(White|Black) to play$/.exec(body.trim());
       if (m) {
-        out.move = Number(m[1]);
+        out.move = m[1] ? Number(m[1]) : null;
         out.white_to_play = m[2] === 'White';
       }
+    } else if (kind === 'You') {
+      const b = body.trim();
+      if (b === 'White' || b === 'Black') out.you_white = b === 'White';
     } else if (kind === 'Engine') {
       const fields = body.split('|').map((f) => f.trim());
       const eng: ParsedEngine = { name: fields[0], depth: null, eval: null, best: null, line: null, also: [] };

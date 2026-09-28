@@ -6,7 +6,7 @@
 import { Chess } from 'chess.js';
 import type { EngineLine } from '../engine/EngineClient';
 import type { ChatLeafPart, ChatMessage, ChatPart } from '../types';
-import { contextText, parseContext, type ContextEngineInfo } from './promptContext';
+import { contextText, parseContext, type ContextEngineInfo, type ContextSide } from './promptContext';
 import { Board, doubledFiles, evalSpans, extractClaims, isolatedSquares, kingShelter, looseSquares, materialBalance, mobility, passedSquares, sentences, verify, type Claim } from './claims';
 import { lineVariations } from './lines';
 import { toolEvals } from './tools';
@@ -40,15 +40,37 @@ export interface ChatContextInput {
   candidates?: { uci: string; p: number }[] | null;
   sendEngine: boolean;
   sendCandidates: boolean;
+  /** The user's side (userSide) -> the `[You: White|Black]` block; null / undefined: none. */
+  you?: ContextSide | null;
 }
 
-/** The context part of a question: always the position note, then the engine block when there is a result for the
- * position, else the candidates block. */
+/** "I'm playing" setting: a fixed side, the board / Simulate (auto), or no [You] block at all (off). */
+export type UserSideSetting = 'auto' | 'white' | 'black' | 'off';
+
+/**
+ * The user's side for the `[You]` block of a chat question (ChessMind chessmind/data/perspective.py: answers address
+ * that side as "you" and the other as "your opponent"; it may be the side NOT to move). The rule:
+ *   - setting 'white' / 'black' ("I'm playing: White / Black"): that side, always;
+ *   - setting 'off': no block;
+ *   - setting 'auto': while a Simulate run is going (`simModelColor` set: running or paused; the caller passes null
+ *     when idle), the colour ChessMind does NOT play (the user sits with its opponent); otherwise the board
+ *     orientation, i.e. the side at the bottom (White by default; a flip, or a game imported for a player, puts the
+ *     user's side there).
+ */
+export function userSide(setting: UserSideSetting, o: { orientation: 'white' | 'black'; simModelColor?: 'w' | 'b' | null }): ContextSide | null {
+  if (setting === 'white' || setting === 'black') return setting;
+  if (setting === 'off') return null;
+  if (o.simModelColor) return o.simModelColor === 'w' ? 'black' : 'white';
+  return o.orientation;
+}
+
+/** The context part of a question: always the position note, the user's side when known, then the engine block when
+ * there is a result for the position, else the candidates block. */
 export function chatContext(o: ChatContextInput): string {
   try {
     const engine = o.sendEngine && o.engine ? o.engine : null;
     const candidates = !engine && o.sendCandidates && o.candidates?.length ? o.candidates.map((c) => [c.uci, c.p] as [string, number]) : null;
-    return contextText(o.fen, { engine, candidates });
+    return contextText(o.fen, { engine, candidates, you: o.you ?? null });
   } catch {
     return '';
   }

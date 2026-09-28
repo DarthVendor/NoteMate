@@ -22,7 +22,7 @@ import { newId } from '../state/pgn';
 import { ROOT_ID, type ChatLinePart, type ChatLineState, type ChatMessage, type GameState } from '../types';
 import { ProgressBar, Segmented } from '../ui/primitives';
 import { AppContext } from '../app/AppContext';
-import { MIN_ENGINE_DEPTH, chatContext, contextLabel, engineInfoFor, messageMarks, type MessageMarks } from './chatContext';
+import { MIN_ENGINE_DEPTH, chatContext, contextLabel, engineInfoFor, messageMarks, userSide, type MessageMarks } from './chatContext';
 import { MarkedText } from './MarkedText';
 
 type ChessMindState = ReturnType<typeof useChessMind>;
@@ -83,7 +83,8 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
   const model = models?.find((m) => m.id === modelId) ?? models?.[0];
   const lastAnswer = [...chat].reverse().find((m) => m.role === 'assistant' && m.msPerToken);
   // The analysis engine (when the panel is inside the app): its result goes with questions about its position.
-  const engine = useContext(AppContext)?.engine;
+  const app = useContext(AppContext);
+  const engine = app?.engine;
   // Claim checker marks per finished answer (cached per message object: patches replace only the patched message).
   const marks = useMemo(() => {
     const out = new Map<string, MessageMarks>();
@@ -281,6 +282,9 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
           candidates: pred,
           sendEngine: settings.engineContext,
           sendCandidates: settings.candidatesContext,
+          // [You: White|Black]: the "I'm playing" setting, or (auto) Simulate's non-model colour while a Simulate run
+          // is going (running / paused), else the board orientation (chatContext.ts userSide documents the rule)
+          you: userSide(settings.userSide ?? 'auto', { orientation: app?.orientation ?? 'white', simModelColor: app && app.sim.phase !== 'idle' ? (app.sim.live?.modelColor ?? null) : null }),
         })
       : '';
     cm.ask(text, { originId: state.currentId, fen: fenOpt, context, gameMoves, contextText });

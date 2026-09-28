@@ -42,7 +42,9 @@ pc.cases.forEach((c, i) => {
   const engine = c.engine ? { depth: c.engine.depth, lines: c.engine.lines.map((l) => ({ move: l.move, cp: l.cp, mate: l.mate, pv: l.pv })) } : null;
   const text = contextText(c.fen, { engine, candidates: c.candidates, numbers: c.numbers, showBest: c.show_best });
   check(`context ${i} text`, text === c.text, `\n  got  ${text}\n  want ${c.text}`);
-  const parsed = parseContext(c.text);
+  // the fixture's parsed fields (you_white: scripts/test-perspective.mjs against fixtures/perspective.json)
+  const all = parseContext(c.text);
+  const parsed = Object.fromEntries(Object.keys(c.parsed).map((k) => [k, all[k]]));
   check(`context ${i} parse`, same(parsed, c.parsed), `\n  got  ${JSON.stringify(parsed)}\n  want ${JSON.stringify(c.parsed)}`);
 });
 for (const [cp, mate, want] of [[25, null, '+0.2'], [-25, null, '-0.2'], [75, null, '+0.8'], [4, null, '0.0'], [-5, null, '-0.1'], [37, null, '+0.4'], [null, 3, '#3'], [null, -2, '#-2'], [1234, null, '+12.3']])

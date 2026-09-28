@@ -17,7 +17,7 @@ import { anchorUserLines, dialoguePosition, rewindCandidates } from './snapshots
 import { LineConstraint, MAX_TOOL_CALLS, ToolConstraint, type GenConstraint, type ToolRequestInfo } from './constraint';
 import { DEFAULT_TOOL_TIMEOUT_MS, RESULT_BUDGET, TOOL_SPECS, addToolsBlock, errorText, fitToolResult, type ToolResultData } from './tools';
 import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, DEFAULT_THINK_MOVE_TEMPERATURE, DEFAULT_THINK_MOVE_TOKENS, DEFAULT_THINK_MOVE_TOP_K, ORT_DIR, ORT_SCRIPT_FILE, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type PickThink, type ToWorker, type ChatTrace } from './protocol';
-import { ThinkMoveConstraint } from './thinkMove';
+import { ThinkMoveConstraint, anchorIds } from './thinkMove';
 
 // Minimal typing of the onnxruntime-web globals used here.
 interface OrtTensor { data: Float32Array | BigInt64Array; dims: readonly number[]; dispose?: () => void }
@@ -492,7 +492,9 @@ async function thinkPick(req: Extract<ToWorker, { type: 'pick' }>): Promise<bool
     endP: { ...DEFAULT_LINE_RULES.endP, ...req.lineRules?.endP },
     maxPlies: { ...DEFAULT_LINE_RULES.maxPlies, ...req.lineRules?.maxPlies },
   };
-  const cons = new ThinkMoveConstraint(t, chess.fen(), req.think === 'on' ? true : null, maxThink, rules);
+  // The think opens with the perspective anchor for the side to move ("I'm playing Black, and it's my move."), forced
+  const anchor = req.anchor !== false && t.endThinkId !== null ? anchorIds(t, chess.turn() === 'w') : null;
+  const cons = new ThinkMoveConstraint(t, chess.fen(), req.think === 'on' ? true : null, maxThink, rules, anchor);
   // Board rows of the generated tokens: a legacy tracker primed with the whole game (its state is the game position).
   let tracker: BoardTracker | null = null;
   if (game.rows) {
