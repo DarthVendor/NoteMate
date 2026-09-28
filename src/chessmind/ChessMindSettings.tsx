@@ -123,6 +123,19 @@ export function ChessMindSettings({ cm }: { cm: ChessMindState }) {
             </span>
             <input type="checkbox" checked={settings.engineContext} onChange={(e) => update({ engineContext: e.target.checked })} data-testid="chessmind-engine-context" />
           </label>
+          {info?.thinking && (
+            <label className="field">
+              <span className="field-label">Tools</span>
+              <select className="select" value={settings.tools} onChange={(e) => update({ tools: e.target.value as typeof settings.tools })} data-testid="chessmind-tools">
+                <option value="off">Off</option>
+                <option value="on">Engine (model decides)</option>
+                <option value="force">Engine, first call forced (demo)</option>
+              </select>
+              <span className="field-hint">
+                The model may call Stockfish while it thinks or answers (up to 3 calls, {'≤'} 2.5 s each, on a separate engine); the result is inserted and shown as a chip. Only models trained with tools call on their own; forcing shows the plumbing on older ones.
+              </span>
+            </label>
+          )}
           <label className="check-row">
             <span className="check-text">
               <span>Send the model's top moves</span>

@@ -9,6 +9,7 @@ import { ArrowUp, ArrowUpToLine, Bot, Eraser, Pause, Play, Square as StopIcon, X
 import type { useChessMind } from './useChessMind';
 import { CHAT_MAX_THINK_TOKENS, CHAT_MAX_TOKENS } from './useChessMind';
 import { LineEndNote, ThinkingBlock } from './ThinkingBlock';
+import { ToolChip } from './ToolChip';
 import { LineChips, MarkLabel } from './LineChips';
 import { createdRoots, nodeAtPath, planLineInsert } from './lineTree';
 import type { LineChip } from './lines';
@@ -433,6 +434,9 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
       else if (p.kind === 'line') {
         flush(`t${i}`);
         blocks.push(renderLine(m, i, p));
+      } else if (p.kind === 'tool') {
+        const snap = answerFen(m, i);
+        run.push(<ToolChip key={i} part={p} startFen={snap ? snapshotFen(m, snap) : (m.fen ?? undefined)} />);
       }
     });
     flush('end');

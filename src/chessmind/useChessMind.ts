@@ -6,6 +6,8 @@ import type { ChatMessage } from '../types';
 import { DEFAULT_LINE_RULES } from './lineRules';
 import type { GameAction } from '../state/gameReducer';
 import { newId } from '../state/pgn';
+import { TOOL_SPECS, errorText } from './tools';
+import type { RunTool } from './useChessMindTools';
 
 /** One entry of chessmind/models.json (written by scripts/copy-chessmind.mjs). */
 export interface ChessMindModel {
@@ -47,6 +49,9 @@ export interface ChessMindSettings {
   candidatesContext: boolean;
   /** Mark answer sentences whose board facts are false (claims.ts), and evaluations made up without an engine. */
   checkClaims: boolean;
+  /** Tool calling (models whose tokenizer has the tool tokens; tools.ts): 'on' offers the engine tool (the model
+   * decides when to call it), 'force' also forces its first call (a demo for models not trained with tools). */
+  tools: 'off' | 'on' | 'force';
 }
 
 export interface PickResult {
@@ -63,7 +68,7 @@ const STORAGE_KEY = 'notemate.chessmind.v1';
 const SETTINGS_VERSION = 2;
 /** Plies of history the simulator gives a board-embedding model (see pick). */
 const SIM_CONTEXT_PLIES = 16;
-const DEFAULTS: ChessMindSettings = { enabled: false, modelId: '', backend: 'auto', arrows: true, aboutPosition: false, sendMoves: true, contextPlies: 'full', think: 'auto', temperature: 0.8, lineEndAnswer: DEFAULT_LINE_RULES.endP.answer, lineEndThink: DEFAULT_LINE_RULES.endP.think, maxLinePliesAnswer: DEFAULT_LINE_RULES.maxPlies.answer, maxLinePliesThink: DEFAULT_LINE_RULES.maxPlies.think, engineContext: true, candidatesContext: true, checkClaims: true };
+const DEFAULTS: ChessMindSettings = { enabled: false, modelId: '', backend: 'auto', arrows: true, aboutPosition: false, sendMoves: true, contextPlies: 'full', think: 'auto', temperature: 0.8, lineEndAnswer: DEFAULT_LINE_RULES.endP.answer, lineEndThink: DEFAULT_LINE_RULES.endP.think, maxLinePliesAnswer: DEFAULT_LINE_RULES.maxPlies.answer, maxLinePliesThink: DEFAULT_LINE_RULES.maxPlies.think, engineContext: true, candidatesContext: true, checkClaims: true, tools: 'off' };
 /** Earlier chat turns (user + assistant messages) sent with a question, so follow-ups like "no, the other one"
  * have their context. The KV cache makes the extra prompt a one-off prefill; the worker trims the think budget
  * (and drops the oldest turns) to fit the context. */
@@ -96,7 +101,7 @@ const modelBase = (id: string) => new URL(`chessmind/${id}/`, location.href).hre
  * start position (null when the game has a custom start, which the model cannot follow).
  * The conversation lives in the game state (`chat`, updated through `dispatch`).
  */
-export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispatch: (a: GameAction) => void) {
+export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispatch: (a: GameAction) => void, runTool?: RunTool) {
   const [settings, setSettings] = useState<ChessMindSettings>(loadSettings);
   const [models, setModels] = useState<ChessMindModel[] | null>(null);
   const [modelsError, setModelsError] = useState<string | null>(null);
@@ -114,6 +119,10 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
   const chatMsg = useRef<string | null>(null);
   /** Outstanding pick() requests (the simulator), by worker request id. */
   const picks = useRef(new Map<number, { resolve: (r: PickResult) => void; reject: (e: Error) => void }>());
+  const runToolRef = useRef(runTool);
+  useEffect(() => {
+    runToolRef.current = runTool;
+  }, [runTool]);
   /** While true the automatic prediction for the current position is skipped (the simulator drives the model). */
   const [suspended, setSuspended] = useState(false);
 
@@ -187,6 +196,20 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
         case 'debug':
           console.log('[chessmind-debug]', JSON.stringify(m.data));
           break;
+        case 'tool-call': {
+          // The model paused at <|tool_result|>: run the tool and send the result back (the worker times out on its own).
+          const reply = (text: string, ok: boolean, compact?: string[]) =>
+            worker.postMessage({ type: 'tool-result', id: m.id, call: m.call, text, ok, compact } satisfies ToWorker);
+          const title = TOOL_SPECS[m.name]?.title ?? 'Tool';
+          const run = runToolRef.current;
+          if (!run) reply(errorText(title, 'unavailable'), false);
+          else
+            run({ name: m.name, fen: m.fen, moves: m.moves, numbers: m.numbers }).then(
+              (r) => reply(r.text, r.ok, r.compact),
+              () => reply(errorText(title, 'error'), false),
+            );
+          break;
+        }
         case 'picked': {
           const p = picks.current.get(m.id);
           picks.current.delete(m.id);
@@ -295,9 +318,10 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
           { id: answerId, role: 'assistant', kind: 'model', parts: [], originId: opts.originId, fen: opts.fen },
         ],
       });
-      worker.postMessage({ type: 'chat', id, history, prompt: text, fen: opts.fen, context: opts.context, gameMoves: opts.gameMoves, contextText: opts.contextText || undefined, maxTokens: CHAT_MAX_TOKENS, temperature: settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: settings.think, maxThinkTokens: CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } } } satisfies ToWorker);
+      const tools = settings.tools !== 'off' ? { names: ['engine'], takesLine: { engine: TOOL_SPECS.engine.takesLine }, force: settings.tools === 'force' ? 'engine' : null } : undefined;
+      worker.postMessage({ type: 'chat', id, history, prompt: text, fen: opts.fen, context: opts.context, gameMoves: opts.gameMoves, contextText: opts.contextText || undefined, maxTokens: CHAT_MAX_TOKENS, temperature: settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: settings.think, maxThinkTokens: CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } }, tools } satisfies ToWorker);
     },
-    [chat, status, dispatch, settings.think, settings.temperature, settings.lineEndAnswer, settings.lineEndThink, settings.maxLinePliesAnswer, settings.maxLinePliesThink],
+    [chat, status, dispatch, settings.think, settings.temperature, settings.lineEndAnswer, settings.lineEndThink, settings.maxLinePliesAnswer, settings.maxLinePliesThink, settings.tools],
   );
 
   /** Top moves for the position after `movesUci` plus a short explanation from the model. */

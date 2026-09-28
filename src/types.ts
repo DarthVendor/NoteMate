@@ -76,8 +76,13 @@ export interface LineBranch {
 }
 /** A move line: the main line's UCI moves, its branches and its end marker. */
 export type ChatLinePart = { kind: 'line'; moves: string[]; branches?: LineBranch[]; end?: LineMark };
-/** One part of a ChessMind chat message: text, a line of UCI moves, or a board snapshot. */
-export type ChatLeafPart = { kind: 'text'; text: string } | ChatLinePart | { kind: 'fen'; fen: string };
+/** A tool call of the model (`<|tool|> name [line] <|tool_result|>`) and the result the app inserted (ChessMind
+ * docs/tools.md). `moves`: the call's line (the position asked about, from where lines start); `result`: undefined
+ * while the call waits for its result; `ok` false for an error result (timeout); `fen`: the position the app ran the
+ * tool on (set by the worker). */
+export type ChatToolPart = { kind: 'tool'; name: string; moves?: string[]; result?: string; ok?: boolean; fen?: string };
+/** One part of a ChessMind chat message: text, a line of UCI moves, a board snapshot, or a tool call. */
+export type ChatLeafPart = { kind: 'text'; text: string } | ChatLinePart | { kind: 'fen'; fen: string } | ChatToolPart;
 /** ...or (first part of an assistant answer, format-4 models) hidden reasoning: `<|think|> parts <|end_think|>`. */
 export type ChatPart =
   | ChatLeafPart

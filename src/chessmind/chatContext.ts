@@ -9,6 +9,7 @@ import type { ChatLeafPart, ChatMessage, ChatPart } from '../types';
 import { contextText, parseContext, type ContextEngineInfo } from './promptContext';
 import { Board, doubledFiles, evalSpans, extractClaims, isolatedSquares, kingShelter, looseSquares, materialBalance, mobility, passedSquares, sentences, verify, type Claim } from './claims';
 import { lineVariations } from './lines';
+import { toolEvals } from './tools';
 
 /** Engine results shallower than this are not sent (the first iterations of a search are noise). */
 export const MIN_ENGINE_DEPTH = 10;
@@ -260,7 +261,8 @@ export function messageMarks(m: ChatMessage, user: ChatMessage | undefined): Mes
   } catch {
     return out;
   }
-  const flagEvals = !parseContext(user?.contextText).engine;
+  // An engine result in the question or in the answer's own tool calls: its numbers are not made up
+  const flagEvals = !parseContext(user?.contextText).engine && !toolEvals(m.parts).length;
   const mark = (parts: ChatPart[], into: Map<number, TextSegment[]>) =>
     parts.forEach((p, i) => {
       if (p.kind !== 'text' || !p.text.trim()) return;

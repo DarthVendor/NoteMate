@@ -10,6 +10,7 @@ import type { ChatLeafPart } from '../types';
 import { DEFAULT_MAX_THINK_TOKENS } from './protocol';
 import { LINE_END_LABEL, lineEnding } from './lineRules';
 import { lineText } from './lines';
+import { ToolChip } from './ToolChip';
 import './ThinkingBlock.css';
 
 interface Props {
@@ -77,6 +78,7 @@ export function ThinkingBlock({ parts, open, tokens, done, startFen, resolveFen,
   else if (tokens !== undefined) label = `Thought for ${tokens} token${tokens === 1 ? '' : 's'}`;
   else label = 'Reasoning';
   const canExpand = !empty;
+  const calls = parts.filter((p) => p.kind === 'tool').length;
 
   // Lines start from the latest snapshot inside the think, else from startFen.
   const lineFens: (string | undefined)[] = [];
@@ -111,11 +113,18 @@ export function ThinkingBlock({ parts, open, tokens, done, startFen, resolveFen,
           </span>
         )}
       </button>
+      {!expanded && calls > 0 && (
+        // Tool calls stay visible while the reasoning is collapsed: what the model looked up, and the answer it got.
+        <div className="cm-think-tools">
+          {parts.map((p, i) => (p.kind === 'tool' ? <ToolChip key={i} part={p} startFen={lineFens[i]} /> : null))}
+        </div>
+      )}
       {expanded && canExpand && (
         <div className="cm-think-body" id={bodyId}>
           {parts.map((p, i) => {
             if (p.kind === 'text') return <p key={i} className="cm-think-text">{renderText ? renderText(p.text, i) : p.text}</p>;
             if (p.kind === 'fen') return <p key={i} className="cm-think-fen">position · {sideOf(p.fen)} to move</p>;
+            if (p.kind === 'tool') return <p key={i} className="cm-think-tool"><ToolChip part={p} startFen={lineFens[i]} /></p>;
             return (
               <p key={i} className="cm-think-line">
                 {!p.moves.length ? '(empty line)' : p.branches?.length || p.end ? lineText(p, lineFens[i]) : sanLine(lineFens[i], p.moves)}

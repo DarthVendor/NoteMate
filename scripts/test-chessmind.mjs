@@ -6,9 +6,10 @@
 // line branches and end markers (the named format-4 extras: <|branch|>, <|repetition|> ...; encode, rows, decode and
 // the generation mask along each line, src/chessmind/lines.ts LineWalker), the board snapshots an answer may show
 // (snapshots.ts: rewind candidates and the trie masks while one is written), and the KV-cache slide (kv.ts moveKeys).
+// An 8-extra v4 file gains the tool tokens on load (append-only slots; tool calling itself: scripts/test-tools.mjs).
 // Usage: node scripts/test-chessmind.mjs   (Node >= 23: imports the TypeScript sources directly)
 import { existsSync, readFileSync } from 'node:fs';
-import { ChessTokenizer } from '../src/chessmind/tokenizer.ts';
+import { BASE_EXTRA_COUNT, ChessTokenizer, EXTRA_SPECIAL_TOKENS } from '../src/chessmind/tokenizer.ts';
 import { BoardTracker, encodeFen, encodeGameWithBoards } from '../src/chessmind/boards.ts';
 import { moveKeys, rowsHash, sharedPrefix } from '../src/chessmind/kv.ts';
 import { LineWatch, lineEnding, probAmong } from '../src/chessmind/lineRules.ts';
@@ -81,7 +82,7 @@ if (existsSync(v4Url)) {
   const extras = f4.chess_vocab.extra_special ?? [];
   check(
     'v4 extra specials',
-    t4.supportsThinking && t4.endThinkId === t4.extraOffset && t4.extraOffset === (f4.chess_vocab.extra_offset ?? -1) && t4.size === t4.extraOffset + extras.length,
+    t4.supportsThinking && t4.endThinkId === t4.extraOffset && t4.extraOffset === (f4.chess_vocab.extra_offset ?? -1) && t4.size === t4.extraOffset + Math.max(extras.length, extras.length >= BASE_EXTRA_COUNT ? EXTRA_SPECIAL_TOKENS.length : 0),
     `endThink ${t4.endThinkId} extraOffset ${t4.extraOffset} size ${t4.size}`,
   );
   check('v4 extras are not text ids', !t4.isTextId(t4.extraOffset) && t4.isTextId(t4.extraOffset - 1) && t4.decode([t4.endThinkId]) === '<|end_think|>');

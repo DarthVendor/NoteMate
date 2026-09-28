@@ -1,0 +1,101 @@
+/* Tool-call chips of a ChessMind answer (ToolChip.tsx). Colours come from the design tokens. */
+.cm-tool {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 100%;
+  margin: 1px 4px 3px 0;
+  vertical-align: middle;
+  font-size: var(--fs-2xs, 10.5px);
+  line-height: 1.5;
+}
+.cm-tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 1px 8px 1px 6px;
+  font: inherit;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--text-2, #aaa);
+  background: color-mix(in srgb, var(--cm, #7c6cf0) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--cm, #7c6cf0) 28%, var(--border, #333));
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background var(--dur-fast, 110ms), color var(--dur-fast, 110ms);
+}
+.cm-tool-chip:hover:not(:disabled) {
+  color: var(--text-1, #ddd);
+  background: color-mix(in srgb, var(--cm, #7c6cf0) 18%, transparent);
+}
+.cm-tool-chip:focus-visible {
+  outline: 2px solid var(--focus, currentColor);
+  outline-offset: 1px;
+}
+.cm-tool-chip:disabled {
+  cursor: progress;
+}
+.cm-tool-icon {
+  display: inline-flex;
+  color: var(--cm, #7c6cf0);
+}
+.cm-tool-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cm-tool-where {
+  color: var(--text-3, #888);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cm-tool.is-pending .cm-tool-label {
+  animation: cm-tool-pulse 1.2s ease-in-out infinite;
+}
+.cm-tool.is-error .cm-tool-chip {
+  color: var(--text-3, #888);
+  background: color-mix(in srgb, var(--text-3, #888) 10%, transparent);
+  border-color: var(--border, #333);
+}
+.cm-tool.is-error .cm-tool-icon {
+  color: var(--text-3, #888);
+}
+.cm-tool-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 4px 0 2px;
+  padding: 5px 7px;
+  max-width: 100%;
+  background: var(--surface, rgba(127, 127, 127, 0.06));
+  border: 1px solid var(--border, #333);
+  border-radius: var(--r-sm, 5px);
+}
+.cm-tool-row {
+  color: var(--text-3, #888);
+}
+.cm-tool-fen {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  word-break: break-all;
+}
+.cm-tool-result {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--text-1, #ddd);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+@keyframes cm-tool-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cm-tool.is-pending .cm-tool-label {
+    animation: none;
+  }
+}

@@ -140,3 +140,12 @@
   font-style: italic;
   white-space: nowrap;
 }
+.cm-think-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 0;
+  margin: 2px 0 0;
+}
+.cm-think-tool {
+  margin: 2px 0;
+}

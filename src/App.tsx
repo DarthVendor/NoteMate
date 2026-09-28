@@ -4,6 +4,7 @@ import './panels';
 import { PgnImport } from './components/PgnImport';
 import { useEngine } from './engine/useEngine';
 import { useChessMind } from './chessmind/useChessMind';
+import { useChessMindTools } from './chessmind/useChessMindTools';
 import { ROOT_ID, type Square } from './types';
 import type { Orientation } from './components/boardGeometry';
 import { useGame } from './state/useGame';
@@ -53,7 +54,9 @@ export default function App() {
   const engine = useEngine(fen, simActive || reviewBusy);
   const standardStart = state.startFen.split(' ').slice(0, 4).join(' ') === DEFAULT_POSITION.split(' ').slice(0, 4).join(' ');
   const uciMoves = useMemo(() => (standardStart ? chess.history({ verbose: true }).map((m) => m.lan) : null), [chess, standardStart]);
-  const chessmind = useChessMind(uciMoves, state.chat ?? [], dispatch);
+  // Tools ChessMind may call (tool calling): a dedicated engine, separate from the analysis engine
+  const chessmindTools = useChessMindTools(engine.settings, engine.available);
+  const chessmind = useChessMind(uciMoves, state.chat ?? [], dispatch, chessmindTools);
   const sim = useSimulate({ state, dispatch, cm: chessmind, engineSettings: engine.settings, engineAvailable: engine.available });
   useEffect(() => setSimActive(sim.phase === 'loading' || sim.phase === 'running' || sim.phase === 'paused'), [sim.phase]);
   const review = useGameReview({ state, dispatch, engineSettings: engine.settings, engineAvailable: engine.available, onBusy: setReviewBusy });

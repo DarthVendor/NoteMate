@@ -12,9 +12,10 @@ import { Chess } from 'chess.js';
 import { ChessTokenizer, type DialoguePart, type DialogueTurn } from './tokenizer';
 import { BoardTracker, encodeGameWithBoards, N_SLOTS, type BoardRow } from './boards';
 import { KV_SINKS, moveKeys, rowsHash, sharedPrefix } from './kv';
-import { DEFAULT_LINE_RULES, LineWatch, probAmong, type LineRules } from './lineRules';
-import { LineWalker } from './lines';
-import { SnapshotPicker, dialoguePosition, rewindCandidates } from './snapshots';
+import { DEFAULT_LINE_RULES, probAmong, type LineRules } from './lineRules';
+import { dialoguePosition, rewindCandidates } from './snapshots';
+import { LineConstraint, MAX_TOOL_CALLS, ToolConstraint, type GenConstraint, type ToolRequestInfo } from './constraint';
+import { DEFAULT_TOOL_TIMEOUT_MS, RESULT_BUDGET, TOOL_SPECS, addToolsBlock, errorText, fitToolResult, type ToolResultData } from './tools';
 import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, ORT_DIR, ORT_SCRIPT_FILE, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type ToWorker } from './protocol';
 
 // Minimal typing of the onnxruntime-web globals used here.
@@ -457,115 +458,6 @@ function sample(logits: Float32Array, allowed: number[], temperature: number, to
   return cand[cand.length - 1].i;
 }
 
-/**
- * Port of chessmind.model.generate.LineConstraint: text outside <|line|>, legal moves (+ <|end_line|>) inside.
- *
- * `start`: where lines begin (the user's FEN; undefined = the initial position). `positions`: candidate boards
- * (rewindCandidates: the position under discussion, the one before its last move, the initial position and the
- * positions along the user's game); when given (and the tokenizer can think), `<|fen|>` may be sampled and the side
- * + 64 piece tokens after it walk a trie of the candidates (snapshots.ts SnapshotPicker; forced once one is left),
- * which then becomes the start of later lines. Hidden reasoning (tokenizers with <|end_think|>): `think` true forces <|think|>
- * as the first token, false forbids it, null lets the model choose (first token only). Inside the think the turn
- * cannot end (no <|eos|> / <|user|>), <|end_think|> closes it outside a line, and after `maxThinkTokens` think
- * tokens the close is forced (<|end_line|> first when a line is open). <|end_think|> restores the line start that
- * was active before the think. A tokenizer without <|end_think|> gets exactly the old masks.
- */
-class LineConstraint {
-  /** The open line (its board, plies and repetitions). */
-  private line: LineWatch | null = null;
-  /** Tokenizers with line branches / end markers: the open line's walker (branches, forced markers, lines.ts). */
-  private walker: LineWalker | null = null;
-  private readonly rules: LineRules;
-  private readonly t: ChessTokenizer;
-  private start: string | undefined;
-  /** The boards a <|fen|> may show (a trie over their snapshot tokens). */
-  private readonly snapshots: SnapshotPicker;
-  private readonly endThink: number | null;
-  private readonly think: boolean | null;
-  private readonly maxThinkTokens: number | null;
-  private readonly textMask: number[];
-  private readonly thinkTextMask: number[];
-  private inThink = false;
-  private thinkTokens = 0;
-  private outerStart: string | undefined;
-  private seen = 0;
-  constructor(t: ChessTokenizer, start?: string, positions: string[] = [], think: boolean | null = null, maxThinkTokens: number | null = null, rules: LineRules = DEFAULT_LINE_RULES) {
-    this.t = t;
-    this.rules = rules;
-    this.start = start;
-    this.endThink = t.endThinkId;
-    this.think = this.endThink !== null ? think : false;
-    this.maxThinkTokens = maxThinkTokens;
-    // Board snapshots only for models that can think (format 4 was trained with them; keep older masks unchanged).
-    this.snapshots = new SnapshotPicker(t, this.endThink !== null ? positions : []);
-    const base: number[] = [];
-    for (let i = t.textOffset; i < t.extraOffset; i++) base.push(i);
-    base.push(t.lineId);
-    if (this.snapshots.size) base.push(t.fenId);
-    this.textMask = [...base, t.eosId, t.userId];
-    this.thinkTextMask = this.endThink !== null ? [...base, this.endThink] : base;
-  }
-  private feedOne(id: number, index: number) {
-    const t = this.t;
-    if (this.inThink) this.thinkTokens++;
-    if (this.snapshots.active) {
-      const chosen = this.snapshots.feed(id);
-      if (chosen !== null) this.start = chosen;
-      return;
-    }
-    if (index === 0 && id === t.thinkId && this.endThink !== null) {
-      this.inThink = true;
-      this.outerStart = this.start;
-      return;
-    }
-    if (this.inThink && id === this.endThink) {
-      this.inThink = false;
-      this.start = this.outerStart;
-      this.line = null;
-      this.walker = null;
-      return;
-    }
-    if (id === t.fenId && this.snapshots.size) this.snapshots.begin();
-    else if (id === t.lineId) {
-      this.line = new LineWatch(this.start);
-      this.walker = t.supportsBranches ? new LineWalker(t, this.start) : null;
-    } else if (id === t.endLineId) {
-      this.line = null;
-      this.walker = null;
-    } else if (this.walker) this.walker.feed(id);
-    else if (this.line && t.isMoveId(id)) this.line.push(t.idToMove(id));
-  }
-  /** Inside a line with at least one move: the P(<|end_line|>) that ends it (think or answer threshold). */
-  endThreshold(): number | null {
-    if (!this.line || this.snapshots.active) return null;
-    // the threshold is for <|end_line|>: not inside a branch, and only after a main-line move
-    if (this.walker ? this.walker.inBranch || this.walker.plies === 0 : this.line.plies === 0) return null;
-    return this.inThink ? this.rules.endP.think : this.rules.endP.answer;
-  }
-  allowed(out: number[]): number[] {
-    for (let i = this.seen; i < out.length; i++) this.feedOne(out[i], i);
-    this.seen = out.length;
-    const t = this.t;
-    if (this.snapshots.active) return this.snapshots.allowed();
-    if (out.length === 0 && this.endThink !== null && this.think !== false) {
-      if (this.think) return [t.thinkId];
-      return [...this.textMask, t.thinkId];
-    }
-    const over = this.inThink && this.maxThinkTokens !== null && this.thinkTokens >= this.maxThinkTokens;
-    if (this.line) {
-      const max = this.inThink ? this.rules.maxPlies.think : this.rules.maxPlies.answer;
-      // Branches and end markers: the walker forces the marker of a finished position (the repetition guard) and
-      // closes open branches before the line when the budget or the length cap is spent.
-      if (this.walker) return this.walker.allowed(over || this.walker.plies >= max);
-      if (over) return [t.endLineId];
-      if (this.line.plies >= max || (this.rules.stopFinished && this.line.ended())) return [t.endLineId];
-      return [...legalUci(this.line.board).map((m) => t.moveToId(m)), t.endLineId];
-    }
-    if (this.inThink) return over ? [this.endThink!] : this.thinkTextMask;
-    return this.textMask;
-  }
-}
-
 interface GenOptions {
   id: number;
   prefix: number[];
@@ -583,6 +475,9 @@ interface GenOptions {
   stops: Set<number>;
   render: (out: number[]) => DialoguePart[];
   extra?: Partial<Extract<FromWorker, { type: 'chat-update' }>>;
+  /** Tool calls: after each sampled id (not a stop), ids to append as if generated (a tool result and <|end_tool|>),
+   * read on the KV cache with the next forward; `room` = ids left in the budget. */
+  inject?: (out: number[], room: number) => Promise<number[] | null>;
 }
 
 /** Sample up to maxTokens ids, streaming chat-update messages; stops on a stop id or a stop request. */
@@ -600,7 +495,7 @@ async function generate(o: GenOptions) {
   let prefillMs: number | undefined;
   // ms/token over the steps after the first (the first reads the whole prompt and is reported as prefillMs)
   const msPerToken = () => (out.length > 1 ? (genMs - (prefillMs ?? 0)) / (out.length - 1) : genMs);
-  for (let step = 0; step < o.maxTokens; step++) {
+  for (let step = 0; out.length < o.maxTokens; step++) {
     if (stopped.has(o.id)) {
       post({ type: 'chat-update', id: o.id, parts: o.render(out), tokens: out.length, msPerToken: out.length ? msPerToken() : 0, done: true, stopped: true, prefillMs, ...o.extra });
       return;
@@ -631,7 +526,17 @@ async function generate(o: GenOptions) {
     else if (next === endLineId) inLine = false;
     ids = [...ids, next];
     if (rows && o.nextRow) rows = [...rows, o.nextRow(next)];
-    const done = o.stops.has(next) || step === o.maxTokens - 1;
+    if (o.inject && !o.stops.has(next) && out.length < o.maxTokens) {
+      // A tool call: stream the call first (the chip shows it running), then wait for the result.
+      post({ type: 'chat-update', id: o.id, parts: o.render(out), tokens: out.length, msPerToken: msPerToken(), done: false, prefillMs, ...o.extra });
+      const extra = ((await o.inject(out, o.maxTokens - out.length)) ?? []).slice(0, o.maxTokens - out.length);
+      for (const x of extra) {
+        out.push(x);
+        ids = [...ids, x];
+        if (rows && o.nextRow) rows = [...rows, o.nextRow(x)];
+      }
+    }
+    const done = o.stops.has(next) || out.length >= o.maxTokens || stopped.has(o.id);
     post({ type: 'chat-update', id: o.id, parts: o.render(out), tokens: out.length, msPerToken: msPerToken(), done, prefillMs, ...o.extra });
     if (done) return;
     // Let queued messages (stop, predict) in between steps.
@@ -642,11 +547,15 @@ async function generate(o: GenOptions) {
 async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
   const t = tok!;
   if (!t.hasText) throw new Error('this model has no text tokenizer');
-  const userParts: DialoguePart[] = [];
+  let userParts: DialoguePart[] = [];
   if (req.fen) userParts.push({ kind: 'fen', fen: req.fen });
   userParts.push({ kind: 'text', text: req.prompt });
   if (req.context?.length) userParts.push({ kind: 'line', moves: req.context });
   if (req.contextText) userParts.push({ kind: 'text', text: req.contextText });
+  const tools = req.tools?.names.length && t.supportsTools ? req.tools : null;
+  if (tools) userParts = addToolsBlock(userParts, tools.names);
+  // Models without the tool tokens cannot read earlier answers' tool calls: leave them out
+  if (!t.supportsTools) req.history = req.history.map((h) => ({ ...h, parts: h.parts.filter((p) => p.kind !== 'tool') }));
   // Earlier turns take at most half the context (the rest is for the think and the answer): oldest exchanges go first
   const history = [...req.history];
   let turns: DialogueTurn[] = [...history, { role: 'user', parts: userParts }];
@@ -664,7 +573,9 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
   const mode = req.think ?? 'auto';
   const thinking = t.supportsThinking && mode !== 'off';
   // The think fits the context: what the prompt and the answer leave (a quarter of it at least), as chat() in generate.py
-  const room = manifest!.max_seq_len - prefix.length - req.maxTokens - 3;
+  const maxCalls = tools ? (tools.maxCalls ?? MAX_TOOL_CALLS) : 0;
+  const toolBudget = RESULT_BUDGET * maxCalls;
+  const room = manifest!.max_seq_len - prefix.length - req.maxTokens - toolBudget - 3;
   const maxThink = Math.max(0, Math.min(req.maxThinkTokens ?? DEFAULT_MAX_THINK_TOKENS, Math.max(room, Math.floor((manifest!.max_seq_len - req.maxTokens) / 4))));
   const rules: LineRules = {
     ...DEFAULT_LINE_RULES,
@@ -672,7 +583,25 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
     endP: { ...DEFAULT_LINE_RULES.endP, ...req.lineRules?.endP },
     maxPlies: { ...DEFAULT_LINE_RULES.maxPlies, ...req.lineRules?.maxPlies },
   };
-  const constraint = new LineConstraint(t, start, positions, mode === 'on' ? true : mode === 'off' ? false : null, maxThink, rules);
+  const lines = new LineConstraint(t, start, positions, mode === 'on' ? true : mode === 'off' ? false : null, maxThink, rules);
+  const under = positions[0];
+  const toolConstraint = tools ? new ToolConstraint(lines, t, tools.names, under, maxCalls, tools.force ?? null, tools.takesLine ?? {}) : null;
+  const constraint: GenConstraint = toolConstraint ?? lines;
+  /** The calls made so far: where the tool ran and whether it answered (the text does not carry these). */
+  const made: { fen: string; ok: boolean }[] = [];
+  const inject = toolConstraint
+    ? async (out: number[], room: number): Promise<number[] | null> => {
+        if (out[out.length - 1] !== t.toolResultId) return null;
+        toolConstraint.sync(out);
+        const call = toolConstraint.pending();
+        if (!call) return null;
+        const title = TOOL_SPECS[call.name]?.title ?? 'Tool';
+        const result = await askTool(req.id, made.length, call, tools!.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS, title);
+        const fit = fitToolResult(t, result, room, title);
+        made.push({ fen: call.fen, ok: result.ok && fit.text !== '' && !fit.text.includes(': no result (') });
+        return fit.ids;
+      }
+    : undefined;
   const tracker = manifest!.boards ? new BoardTracker(t) : null;
   const endThink = t.endThinkId;
   await generate({
@@ -680,7 +609,8 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
     prefix,
     prefixRows: tracker?.rows(prefix),
     nextRow: tracker ? (id) => tracker.feed(id) : undefined,
-    maxTokens: req.maxTokens + (thinking ? maxThink + 2 : 0),
+    maxTokens: req.maxTokens + (thinking ? maxThink + 2 : 0) + toolBudget,
+    inject,
     temperature: req.temperature,
     topK: req.topK,
     lineTemperature: req.lineTemperature ?? DEFAULT_LINE_TEMPERATURE,
@@ -689,12 +619,38 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
     stops: new Set([t.eosId, t.userId]),
     render: (out) => {
       const parts = t.decodeDialogueContent(out);
+      if (made.length) {
+        let k = 0;
+        for (const p of parts) {
+          const leaves = p.kind === 'think' ? p.parts : [p];
+          for (const q of leaves) if (q.kind === 'tool' && k < made.length) Object.assign(q, made[k++]);
+        }
+      }
       if (parts[0]?.kind === 'think' && out[0] === t.thinkId) {
         const close = endThink === null ? -1 : out.indexOf(endThink);
         parts[0] = { ...parts[0], open: close < 0, tokens: (close < 0 ? out.length : close) - 1 };
       }
       return parts;
     },
+  });
+}
+
+/** Pending `tool-call`s by `${request id}:${call index}`. */
+const toolWaiters = new Map<string, (r: ToolResultData) => void>();
+
+/** Ask the app to run a tool; an error result after `timeoutMs` or when the request is stopped. */
+function askTool(id: number, call: number, info: ToolRequestInfo, timeoutMs: number, title: string): Promise<ToolResultData> {
+  const key = `${id}:${call}`;
+  return new Promise<ToolResultData>((resolve) => {
+    const timer = setTimeout(() => finish({ text: errorText(title, 'timeout'), ok: false }), timeoutMs);
+    const finish = (r: ToolResultData) => {
+      clearTimeout(timer);
+      if (toolWaiters.get(key) === finish) toolWaiters.delete(key);
+      resolve(r);
+    };
+    toolWaiters.set(key, finish);
+    // Snapshot and game FENs carry real move numbers here (the app's own positions)
+    post({ type: 'tool-call', id, call, name: info.name, fen: info.fen, moves: info.moves, baseFen: info.baseFen, numbers: true });
   });
 }
 
@@ -762,6 +718,10 @@ ctx.onmessage = (e: MessageEvent<ToWorker>) => {
       break;
     case 'stop':
       stopped.add(msg.id);
+      for (const [key, finish] of toolWaiters) if (key.startsWith(`${msg.id}:`)) finish({ text: errorText('Tool', 'stopped'), ok: false });
+      break;
+    case 'tool-result':
+      toolWaiters.get(`${msg.id}:${msg.call}`)?.({ text: msg.text, ok: msg.ok, compact: msg.compact });
       break;
   }
 };

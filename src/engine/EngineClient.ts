@@ -209,6 +209,41 @@ export class EngineClient {
     }
   }
 
+  /**
+   * One MultiPV search with a depth / time limit (ChessMind's engine tool): resolves with the last line of each rank
+   * (side to move's point of view, best first). Meant for a dedicated client: a running analysis is stopped first.
+   */
+  async searchLines(fen: string, limit: { depth?: number; movetime?: number }, multipv: number, timeoutMs = 30000): Promise<EngineLine[]> {
+    if (this.searching) {
+      const stopped = this.wait((l) => l.startsWith('bestmove'), 10000).catch(() => '');
+      this.stop();
+      await stopped;
+    }
+    await this.setOption('MultiPV', Math.max(1, Math.round(multipv)));
+    const lines = new Map<number, EngineLine>();
+    this.tap = (l) => {
+      if (!l.startsWith('info ')) return;
+      const parsed = parseInfo(l);
+      if (parsed && !/ (upperbound|lowerbound) /.test(l)) lines.set(parsed.multipv, parsed);
+    };
+    const done = this.wait((l) => l.startsWith('bestmove'), timeoutMs);
+    this.searching = true;
+    this.acceptingInfo = false;
+    this.send(`position fen ${fen}`);
+    const parts = [limit.depth ? `depth ${Math.max(1, Math.round(limit.depth))}` : '', limit.movetime ? `movetime ${Math.max(1, Math.round(limit.movetime))}` : ''].filter(Boolean);
+    this.send(`go ${parts.join(' ') || 'movetime 1000'}`);
+    try {
+      await done;
+    } catch (e) {
+      this.stop();
+      throw e;
+    } finally {
+      this.tap = null;
+    }
+    // every rank from the deepest completed iteration: ranks of a shallower one only when the last was cut short
+    return [...lines.values()].sort((a, b) => a.multipv - b.multipv);
+  }
+
   stop() {
     this.queued = null;
     this.acceptingInfo = false;

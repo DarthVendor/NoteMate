@@ -16,6 +16,8 @@
  *      Extras 1-6 were `<|reserved_k|>` placeholders and are now named (same ids): `<|branch|>`, `<|end_branch|>`,
  *      `<|repetition|>`, `<|draw|>`, `<|mate|>`, `<|check|>` -- line branches and markers (lines.ts). A file listing the
  *      placeholders loads with the new names, as in Python (LEGACY_EXTRA_NAMES).
+ *      Extras 8-10 are the tool tokens (`<|tool|>`, `<|tool_result|>`, `<|end_tool|>`; tools.ts, ChessMind
+ *      docs/tools.md): append-only slots, so a file listing the first 8 extras gets them on load (same ids), as in Python.
  * Checked against Python by scripts/test-chessmind.mjs (fixtures from ChessMind's scripts/tokenizer_fixture.py).
  */
 
@@ -49,11 +51,13 @@ interface BpeFile {
 
 export type Perspective = 'white' | 'black';
 
-import type { ChatLeafPart, ChatLinePart, ChatPart, LineBranch, LineMark } from '../types';
+import type { ChatLeafPart, ChatLinePart, ChatPart, ChatToolPart, LineBranch, LineMark } from '../types';
 import { encodeLineTokens } from './lines.ts';
 
 /** Names of the format-4 extras in slot order (tokenizer.EXTRA_SPECIAL_TOKENS); slots 1-6 replace `<|reserved_k|>`. */
-export const EXTRA_SPECIAL_TOKENS = ['<|end_think|>', '<|branch|>', '<|end_branch|>', '<|repetition|>', '<|draw|>', '<|mate|>', '<|check|>', '<|reserved_7|>'];
+export const EXTRA_SPECIAL_TOKENS = ['<|end_think|>', '<|branch|>', '<|end_branch|>', '<|repetition|>', '<|draw|>', '<|mate|>', '<|check|>', '<|reserved_7|>', '<|tool|>', '<|tool_result|>', '<|end_tool|>'];
+/** Extras of a format-4 tokenizer before the tool tokens (tokenizer.BASE_EXTRA_COUNT). */
+export const BASE_EXTRA_COUNT = 8;
 
 /** One part of dialogue content: plain text, a line of UCI moves, a board snapshot (FEN) or (format 4) a think. */
 export type DialoguePart = ChatPart;
@@ -176,6 +180,8 @@ export class ChessTokenizer {
     this.split = pattern ?? SPLIT;
     // Placeholder names of slots 1-5 load as the names those slots have now (same ids).
     this.extraSpecial = (chess.extra_special ?? []).map((t, i) => (i >= 1 && i <= 6 && t === `<|reserved_${i}|>` ? EXTRA_SPECIAL_TOKENS[i] : t));
+    // Append-only slots: a format-4 file saved before the tool tokens gets them (every listed id unchanged).
+    if (this.extraSpecial.length >= BASE_EXTRA_COUNT) this.extraSpecial.push(...EXTRA_SPECIAL_TOKENS.slice(this.extraSpecial.length));
     // Without the BPE file (no text model) the extras' position comes from chess_vocab.json; older files: as before.
     this.extraBase =
       bpe || !this.extraSpecial.length ? this.textOffset + this.textVocabSize : (chess.extra_offset ?? this.textOffset + chess.text_vocab_size);
@@ -227,6 +233,24 @@ export class ChessTokenizer {
   /** Line branches and end markers. */
   get supportsBranches(): boolean {
     return this.branchId !== null && this.endBranchId !== null && Object.keys(this.markerIds).length === 3;
+  }
+  /** `<|tool|>` / `<|tool_result|>` / `<|end_tool|>` (extras 8-10), else null. */
+  get toolId(): number | null {
+    return this.extraId('<|tool|>');
+  }
+  get toolResultId(): number | null {
+    return this.extraId('<|tool_result|>');
+  }
+  get endToolId(): number | null {
+    return this.extraId('<|end_tool|>');
+  }
+  get supportsTools(): boolean {
+    return this.toolId !== null && this.toolResultId !== null && this.endToolId !== null;
+  }
+  /** What the runtime appends after `<|tool_result|>`: the result text and `<|end_tool|>`. */
+  encodeToolResult(text: string): number[] {
+    if (!this.supportsTools) throw new Error('this tokenizer has no tool tokens');
+    return [...this.encodeText(text), this.endToolId!];
   }
   isExtraId(i: number): boolean {
     return i >= this.extraOffset && i < this.size;
@@ -380,6 +404,7 @@ export class ChessTokenizer {
     for (const turn of turns) {
       ids.push(turn.role === 'user' ? this.userId : this.assistantId);
       turn.parts.forEach((part, i) => {
+        if (part.kind === 'tool' && turn.role !== 'assistant') throw new Error('tool calls belong to assistant turns');
         if (part.kind !== 'think') return this.encodePart(part, ids, state);
         if (turn.role !== 'assistant' || i !== 0) throw new Error('a think part must be the first part of an assistant turn');
         const endThink = this.endThinkId;
@@ -398,6 +423,7 @@ export class ChessTokenizer {
   }
 
   private encodePart(part: ChatLeafPart, ids: number[], state: { start?: string }): void {
+    if (part.kind === 'tool') return this.encodeTool(part, ids, state);
     if (part.kind === 'text') ids.push(...this.encodeText(part.text));
     else if (part.kind === 'fen') {
       ids.push(...this.encodeBoard(part.fen));
@@ -410,6 +436,19 @@ export class ChessTokenizer {
         for (const m of part.moves) ids.push(this.moveToId(m)); // older tokenizers: lines are assumed legal
       }
       ids.push(this.endLineId);
+    }
+  }
+
+  /** `<|tool|> name [<|line|> ... <|end_line|>] <|tool_result|> [result <|end_tool|>]` (the line from where lines start). */
+  private encodeTool(part: ChatToolPart, ids: number[], state: { start?: string }): void {
+    if (!this.supportsTools) throw new Error('this tokenizer has no tool tokens');
+    if (!part.name.trim()) throw new Error('a tool call needs a name');
+    ids.push(this.toolId!, ...this.encodeText(part.name.trim()));
+    if (part.moves?.length) this.encodePart({ kind: 'line', moves: part.moves }, ids, state);
+    ids.push(this.toolResultId!);
+    if (part.result !== undefined) {
+      if (!part.result.trim()) throw new Error('an empty tool result');
+      ids.push(...this.encodeToolResult(part.result));
     }
   }
 
@@ -438,6 +477,14 @@ export class ChessTokenizer {
     const endBranch = this.endBranchId;
     const check = this.checkId;
     const markers = new Map<number, LineMark>(Object.entries(this.markerIds).map(([k, v]) => [v, k as LineMark]));
+    const toolOpen = this.toolId;
+    const toolResult = this.toolResultId;
+    const toolEnd = this.endToolId;
+    /** The open tool call, its stage and the text ids of its name / result so far. */
+    let call: ChatToolPart | null = null;
+    let callStage: 'name' | 'result' = 'name';
+    let callIds: number[] = [];
+    const callText = () => this.decodeText(callIds.filter((i) => this.isTextId(i))).trim();
     const out = (): (DialoguePart | ChatLeafPart)[] => think ?? top;
     const flush = () => {
       if (textRun.length) {
@@ -447,6 +494,42 @@ export class ChessTokenizer {
       textRun = [];
     };
     for (const t of ids) {
+      if (call !== null && line === null) {
+        if (callStage === 'name') {
+          if (t === this.lineId) {
+            call.name = callText();
+            line = { kind: 'line', moves: [] };
+            continue;
+          }
+          if (t === toolResult) {
+            call.name = call.name || callText();
+            callStage = 'result';
+            callIds = [];
+            call.result = '';
+            continue;
+          }
+          if (this.isTextId(t)) {
+            callIds.push(t);
+            continue;
+          }
+        } else {
+          if (t === toolEnd) {
+            call.result = callText();
+            call = null;
+            callIds = [];
+            continue;
+          }
+          if (this.isTextId(t)) {
+            callIds.push(t);
+            continue;
+          }
+        }
+        // anything else ends a malformed call
+        if (callStage === 'name') call.name = call.name || callText();
+        else call.result = callText();
+        call = null;
+        callIds = [];
+      }
       if (fenRun !== null) {
         fenRun.push(t);
         if (fenRun.length === 65) {
@@ -478,10 +561,25 @@ export class ChessTokenizer {
           continue;
         }
         if (check !== null && t === check) continue; // derived from the moves (the SAN "+")
-        out().push(line);
-        line = null;
-        stack = [];
-        if (t === this.endLineId) continue;
+        if (call !== null) {
+          // the line of a tool call: the position it asks about
+          if (line.moves.length) call.moves = line.moves;
+          line = null;
+          stack = [];
+          if (t === this.endLineId) continue;
+          if (t === toolResult) {
+            call.result = '';
+            callStage = 'result';
+            callIds = [];
+            continue;
+          }
+          call = null; // malformed: fall through
+        } else {
+          out().push(line);
+          line = null;
+          stack = [];
+          if (t === this.endLineId) continue;
+        }
       }
       if (this.isTextId(t)) {
         textRun.push(t);
@@ -494,9 +592,21 @@ export class ChessTokenizer {
       else if (endThink !== null && t === endThink && think !== null) {
         top.push({ kind: 'think', parts: think });
         think = null;
+      } else if (toolOpen !== null && t === toolOpen) {
+        call = { kind: 'tool', name: '' };
+        callStage = 'name';
+        callIds = [];
+        out().push(call);
       }
     }
     flush();
+    if (call !== null) {
+      if (line !== null) {
+        if (line.moves.length) call.moves = line.moves;
+        line = null;
+      } else if (callStage === 'name') call.name = call.name || callText();
+      else call.result = callText();
+    }
     if (line !== null) out().push(line);
     if (think !== null) top.push({ kind: 'think', parts: think });
     return top;

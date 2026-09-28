@@ -87,7 +87,13 @@ export type ToWorker =
       maxThinkTokens?: number;
       /** Where lines stop (end-line threshold, length cap, finished positions); unset fields: DEFAULT_LINE_RULES. */
       lineRules?: { endP?: Partial<LineRules['endP']>; maxPlies?: Partial<LineRules['maxPlies']>; stopFinished?: boolean };
+      /** Tool calling (tokenizers with the tool tokens; tools.ts): the tools offered (announced as `[Tools: ...]`),
+       * which take a line, the most calls per answer, a tool whose first call is forced (a demo for models not trained
+       * with tools) and how long to wait for each result. The worker asks the app with `tool-call` messages. */
+      tools?: { names: string[]; takesLine?: Record<string, boolean>; maxCalls?: number; force?: string | null; timeoutMs?: number };
     }
+  /** The app's answer to a `tool-call`: the result text (an error result when `ok` is false). */
+  | { type: 'tool-result'; id: number; call: number; text: string; ok: boolean; compact?: string[] }
   | { type: 'explain'; id: number; moves: string[]; maxTokens: number; temperature: number; topK: number; top: number; contextPlies: number | null }
   | { type: 'stop'; id: number }
   /** Choose one move for the position after `moves` (legal-masked): argmax when temperature is 0, else sampled. Not coalesced like predict. */
@@ -101,5 +107,9 @@ export type FromWorker =
   | { type: 'chat-update'; id: number; parts: DialoguePart[]; tokens: number; msPerToken: number; done: boolean; stopped?: boolean; prefillMs?: number; predictions?: MovePrediction[] }
   | { type: 'picked'; id: number; uci: string | null; p: number; ms: number; tokens: number }
   | { type: 'error'; id?: number; message: string }
+  /** The model called a tool (generation is paused): run `name` on `fen` (the position asked about: the call's line
+   * `moves` played from `baseFen`, or the current position) and answer with `tool-result`. `numbers`: move numbers of
+   * `fen` are real. */
+  | { type: 'tool-call'; id: number; call: number; name: string; fen: string; moves: string[]; baseFen?: string; numbers: boolean }
   /** Debug mode only: one forward pass (see worker debugCheck). */
   | { type: 'debug'; data: Record<string, unknown> };
