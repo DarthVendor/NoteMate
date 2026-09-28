@@ -1,4 +1,4 @@
-import { Pause, Play, Settings2, Square, StepForward } from 'lucide-react';
+import { Download, Pause, Play, Settings2, Square, StepForward } from 'lucide-react';
 import type { useSimulate, SimGame } from './useSimulate';
 import { limitLabel } from './useSimulate';
 import { eloDiffFromScore, skillElo } from './elo';
@@ -11,6 +11,7 @@ import { MenuLabel, Popover } from '../ui/Popover';
 import { ThinkingBlock } from '../chessmind/ThinkingBlock';
 import { DEFAULT_THINK_MOVE_TOKENS } from '../chessmind/protocol';
 import { Segmented } from '../ui/primitives';
+import { download, exportJson } from './exportSim';
 
 interface Props {
   sim: ReturnType<typeof useSimulate>;
@@ -245,6 +246,15 @@ export function SimulatePanel({ sim, cm, state, dispatch, onExport }: Props) {
         )}
         <button className="btn btn-sm btn-ghost" onClick={sim.step} disabled={phase === 'loading'} data-testid="sim-step" title="Play one move">
           <StepForward size={12} /> Step
+        </button>
+        <button
+          className="btn btn-sm btn-ghost"
+          disabled={!games.length}
+          onClick={() => download(`notemate-simulate-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`, exportJson(games, s))}
+          title="Save the finished games with every move's probability, time, Stockfish eval and ChessMind's reasoning (JSON with PGN)"
+          data-testid="sim-export-json"
+        >
+          <Download size={12} /> Export analysis
         </button>
         <button className="btn btn-sm btn-ghost" onClick={sim.stop} disabled={!busy} data-testid="sim-stop">
           <Square size={11} /> Stop

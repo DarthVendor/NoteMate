@@ -3,6 +3,7 @@ import { Chess, DEFAULT_POSITION } from 'chess.js';
 import { EngineClient } from '../engine/EngineClient';
 import { ENGINE_BUILDS, resolveEngineSource, type EngineAvailability, type EngineSettings, type EngineSource } from '../engine/engines';
 import type { useChessMind } from '../chessmind/useChessMind';
+import { thinkText } from './exportSim';
 import { DEFAULT_THINK_MOVE_TOKENS, type PickThink, type ThinkMode } from '../chessmind/protocol';
 import { pathTo, type GameAction } from '../state/gameReducer';
 import { newId } from '../state/pgn';
@@ -81,6 +82,23 @@ export interface SimGame {
   modelMs: number;
   engineMs: number;
   date: string;
+  /** Every move of the game in order: who played it, from which position, and what went with it (exportSim.ts). */
+  trace: SimMoveTrace[];
+}
+
+/** One move of a simulated game, for the export. */
+export interface SimMoveTrace {
+  ply: number;
+  fen: string;
+  side: 'model' | 'engine';
+  uci: string;
+  san: string;
+  /** Model: probability of the played move and model time (ms); engine: search time and its eval (side to move). */
+  p?: number;
+  ms: number;
+  evalText?: string;
+  /** Model with thinking on: the reasoning before the move (plain text, lines in SAN), its tokens, cut off or not. */
+  think?: { text: string; tokens: number; open: boolean };
 }
 
 export type SimPhase = 'idle' | 'loading' | 'running' | 'paused';
@@ -296,6 +314,8 @@ export function useSimulate(opts: {
         const startFen = chess.fen();
         const moves = [...prefix];
         const gameMoves: string[] = [];
+        const trace: SimMoveTrace[] = [];
+        let pending: Omit<SimMoveTrace, 'san' | 'ply'> | null = null;
         const sans: string[] = [];
         let parent = startId;
         let firstId: string | null = null;
@@ -345,6 +365,10 @@ export function useSimulate(opts: {
             const wall = performance.now() - t0;
             uci = r.uci;
             if (s.think !== 'off') setThought(r.think ? { fen, ply, san: null, think: r.think } : null);
+            pending = {
+              fen, side: 'model', uci: r.uci ?? '', p: r.p, ms: Math.round(wall),
+              ...(r.think ? { think: { text: thinkText(r.think.parts, fen), tokens: r.think.tokens, open: !!r.think.open } } : {}),
+            };
             modelMs += wall;
             modelN++;
             setLatency((l) => ({ ...l, model: [...l.model, r.ms], modelWall: [...l.modelWall, wall] }));
@@ -352,6 +376,10 @@ export function useSimulate(opts: {
             const r = await engine.bestMove(fen, limit);
             const wall = performance.now() - t0;
             uci = r.move;
+            pending = {
+              fen, side: 'engine', uci: r.move ?? '', ms: Math.round(wall),
+              ...(r.mate !== undefined ? { evalText: `mate ${r.mate}` } : r.cp !== undefined ? { evalText: `${r.cp >= 0 ? '+' : ''}${(r.cp / 100).toFixed(2)}` } : {}),
+            };
             engineMs += wall;
             engineN++;
             setLatency((l) => ({ ...l, engine: [...l.engine, wall] }));
@@ -378,6 +406,8 @@ export function useSimulate(opts: {
           moves.push(uci);
           gameMoves.push(uci);
           sans.push(san);
+          if (pending) trace.push({ ...pending, ply: gameMoves.length, san });
+          pending = null;
           current = { parent: id, plies: gameMoves.length, g };
           setLive({ game: g, total: s.games, ply: gameMoves.length, modelColor, message: label });
           await sleep(s.delay);
@@ -411,6 +441,7 @@ export function useSimulate(opts: {
           modelMs: modelN ? modelMs / modelN : 0,
           engineMs: engineN ? engineMs / engineN : 0,
           date: new Date().toISOString().slice(0, 10).replace(/-/g, '.'),
+          trace,
         };
         setGames((gs) => [...gs, game]);
       }
