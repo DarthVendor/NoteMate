@@ -265,7 +265,7 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
 
   /** Send a question to the model; the answer streams into a new assistant message. */
   const ask = useCallback(
-    (prompt: string, opts: { originId: string; fen?: string; context?: string[] }) => {
+    (prompt: string, opts: { originId: string; fen?: string; context?: string[]; gameMoves?: string[] }) => {
       const worker = workerRef.current;
       const text = prompt.trim();
       if (!worker || status !== 'ready' || chatId.current !== null || !text) return;
@@ -289,7 +289,7 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
           { id: answerId, role: 'assistant', kind: 'model', parts: [], originId: opts.originId, fen: opts.fen },
         ],
       });
-      worker.postMessage({ type: 'chat', id, history, prompt: text, fen: opts.fen, context: opts.context, maxTokens: CHAT_MAX_TOKENS, temperature: settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: settings.think, maxThinkTokens: CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } } } satisfies ToWorker);
+      worker.postMessage({ type: 'chat', id, history, prompt: text, fen: opts.fen, context: opts.context, gameMoves: opts.gameMoves, maxTokens: CHAT_MAX_TOKENS, temperature: settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: settings.think, maxThinkTokens: CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } } } satisfies ToWorker);
     },
     [chat, status, dispatch, settings.think, settings.temperature, settings.lineEndAnswer, settings.lineEndThink, settings.maxLinePliesAnswer, settings.maxLinePliesThink],
   );

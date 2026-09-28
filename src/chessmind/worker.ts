@@ -14,6 +14,7 @@ import { BoardTracker, encodeGameWithBoards, N_SLOTS, type BoardRow } from './bo
 import { KV_SINKS, moveKeys, rowsHash, sharedPrefix } from './kv';
 import { DEFAULT_LINE_RULES, LineWatch, probAmong, type LineRules } from './lineRules';
 import { LineWalker } from './lines';
+import { SnapshotPicker, dialoguePosition, rewindCandidates } from './snapshots';
 import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, ORT_DIR, ORT_SCRIPT_FILE, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type ToWorker } from './protocol';
 
 // Minimal typing of the onnxruntime-web globals used here.
@@ -460,9 +461,10 @@ function sample(logits: Float32Array, allowed: number[], temperature: number, to
  * Port of chessmind.model.generate.LineConstraint: text outside <|line|>, legal moves (+ <|end_line|>) inside.
  *
  * `start`: where lines begin (the user's FEN; undefined = the initial position). `positions`: candidate boards
- * under discussion (dialoguePosition); when given (and the tokenizer can think), `<|fen|>` may be sampled, the side
- * token after it picks the candidate (the first one per side) and the 64 piece tokens are FORCED to it, which then
- * becomes the start of later lines. Hidden reasoning (tokenizers with <|end_think|>): `think` true forces <|think|>
+ * (rewindCandidates: the position under discussion, the one before its last move, the initial position and the
+ * positions along the user's game); when given (and the tokenizer can think), `<|fen|>` may be sampled and the side
+ * + 64 piece tokens after it walk a trie of the candidates (snapshots.ts SnapshotPicker; forced once one is left),
+ * which then becomes the start of later lines. Hidden reasoning (tokenizers with <|end_think|>): `think` true forces <|think|>
  * as the first token, false forbids it, null lets the model choose (first token only). Inside the think the turn
  * cannot end (no <|eos|> / <|user|>), <|end_think|> closes it outside a line, and after `maxThinkTokens` think
  * tokens the close is forced (<|end_line|> first when a line is open). <|end_think|> restores the line start that
@@ -476,9 +478,8 @@ class LineConstraint {
   private readonly rules: LineRules;
   private readonly t: ChessTokenizer;
   private start: string | undefined;
-  /** Side token -> candidate FEN. */
-  private readonly positions = new Map<number, string>();
-  private position: string | null = null;
+  /** The boards a <|fen|> may show (a trie over their snapshot tokens). */
+  private readonly snapshots: SnapshotPicker;
   private readonly endThink: number | null;
   private readonly think: boolean | null;
   private readonly maxThinkTokens: number | null;
@@ -487,9 +488,6 @@ class LineConstraint {
   private inThink = false;
   private thinkTokens = 0;
   private outerStart: string | undefined;
-  private forced: number[] = [];
-  /** Right after <|fen|>: the side token chooses the candidate. */
-  private pickSide = false;
   private seen = 0;
   constructor(t: ChessTokenizer, start?: string, positions: string[] = [], think: boolean | null = null, maxThinkTokens: number | null = null, rules: LineRules = DEFAULT_LINE_RULES) {
     this.t = t;
@@ -499,31 +497,20 @@ class LineConstraint {
     this.think = this.endThink !== null ? think : false;
     this.maxThinkTokens = maxThinkTokens;
     // Board snapshots only for models that can think (format 4 was trained with them; keep older masks unchanged).
-    if (this.endThink !== null) {
-      for (const fen of positions) {
-        const side = fen.split(' ')[1] === 'b' ? t.blackId : t.whiteId;
-        if (!this.positions.has(side)) this.positions.set(side, fen);
-      }
-    }
+    this.snapshots = new SnapshotPicker(t, this.endThink !== null ? positions : []);
     const base: number[] = [];
     for (let i = t.textOffset; i < t.extraOffset; i++) base.push(i);
     base.push(t.lineId);
-    if (this.positions.size) base.push(t.fenId);
+    if (this.snapshots.size) base.push(t.fenId);
     this.textMask = [...base, t.eosId, t.userId];
     this.thinkTextMask = this.endThink !== null ? [...base, this.endThink] : base;
   }
   private feedOne(id: number, index: number) {
     const t = this.t;
     if (this.inThink) this.thinkTokens++;
-    if (this.pickSide) {
-      this.pickSide = false;
-      this.position = this.positions.get(id)!;
-      this.forced = t.encodeBoard(this.position).slice(2);
-      return;
-    }
-    if (this.forced.length) {
-      this.forced.shift();
-      if (!this.forced.length && this.position !== null) this.start = this.position;
+    if (this.snapshots.active) {
+      const chosen = this.snapshots.feed(id);
+      if (chosen !== null) this.start = chosen;
       return;
     }
     if (index === 0 && id === t.thinkId && this.endThink !== null) {
@@ -538,7 +525,7 @@ class LineConstraint {
       this.walker = null;
       return;
     }
-    if (id === t.fenId && this.positions.size) this.pickSide = true;
+    if (id === t.fenId && this.snapshots.size) this.snapshots.begin();
     else if (id === t.lineId) {
       this.line = new LineWatch(this.start);
       this.walker = t.supportsBranches ? new LineWalker(t, this.start) : null;
@@ -550,7 +537,7 @@ class LineConstraint {
   }
   /** Inside a line with at least one move: the P(<|end_line|>) that ends it (think or answer threshold). */
   endThreshold(): number | null {
-    if (!this.line || this.pickSide || this.forced.length) return null;
+    if (!this.line || this.snapshots.active) return null;
     // the threshold is for <|end_line|>: not inside a branch, and only after a main-line move
     if (this.walker ? this.walker.inBranch || this.walker.plies === 0 : this.line.plies === 0) return null;
     return this.inThink ? this.rules.endP.think : this.rules.endP.answer;
@@ -559,8 +546,7 @@ class LineConstraint {
     for (let i = this.seen; i < out.length; i++) this.feedOne(out[i], i);
     this.seen = out.length;
     const t = this.t;
-    if (this.pickSide) return [...this.positions.keys()].sort((a, b) => a - b);
-    if (this.forced.length) return [this.forced[0]];
+    if (this.snapshots.active) return this.snapshots.allowed();
     if (out.length === 0 && this.endThink !== null && this.think !== false) {
       if (this.think) return [t.thinkId];
       return [...this.textMask, t.thinkId];
@@ -578,33 +564,6 @@ class LineConstraint {
     if (this.inThink) return over ? [this.endThink!] : this.thinkTextMask;
     return this.textMask;
   }
-}
-
-/**
- * Port of generate.dialogue_position: `start` = the last snapshot of the dialogue (lines start there) and
- * `positions` = what the last user turn talks about: the end of its last line and the position before that line's
- * last move (a question about the move just played), else the snapshot. FENs.
- */
-function dialoguePosition(turns: DialogueTurn[]): { start?: string; positions: string[] } {
-  let start: string | undefined;
-  let positions: string[] = [];
-  for (const turn of turns) {
-    for (const part of turn.parts) {
-      if (part.kind === 'fen') {
-        start = part.fen;
-        positions = [new Chess(part.fen).fen()];
-      } else if (part.kind === 'line') {
-        const b = new Chess(start);
-        let before: string | null = null;
-        for (const m of part.moves) {
-          before = b.fen();
-          b.move({ from: m.slice(0, 2), to: m.slice(2, 4), promotion: m[4] });
-        }
-        if (turn.role === 'user') positions = [b.fen(), ...(before !== null ? [before] : [])];
-      }
-    }
-  }
-  return { start, positions };
 }
 
 interface GenOptions {
@@ -696,7 +655,9 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
   }
   // <|eos|> <|user|> ... <|assistant|>: the context every training dialogue has (the packer's separator first)
   const prefix = t.chatPrompt(turns);
-  const { start, positions } = dialoguePosition(turns);
+  const { start } = dialoguePosition(turns);
+  // Snapshots may rewind: the initial position and the positions along the game (the moves when only a FEN is sent)
+  const positions = rewindCandidates(turns, req.gameMoves);
   debugTag = `chat ${req.id}`;
   debugMoves = null;
   const mode = req.think ?? 'auto';

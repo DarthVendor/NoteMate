@@ -238,7 +238,9 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
     if (!info?.hasText) return echo(text, 'This model has no text vocabulary.');
     const fenOpt = settings.aboutPosition ? fen : undefined;
     const context = !fenOpt && settings.sendMoves && uciMoves && uciMoves.length ? uciMoves : undefined;
-    cm.ask(text, { originId: state.currentId, fen: fenOpt, context });
+    // With a snapshot, the moves are not in the prompt but an answer may still rewind to a position along them
+    const gameMoves = fenOpt && uciMoves && uciMoves.length ? uciMoves : undefined;
+    cm.ask(text, { originId: state.currentId, fen: fenOpt, context, gameMoves });
   };
 
   // "/" menu entries matching what follows the slash.

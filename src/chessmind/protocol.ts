@@ -66,6 +66,9 @@ export type ToWorker =
       fen?: string;
       /** Game moves (UCI from the start) appended to the question as a <|line|> so the model sees the position. */
       context?: string[];
+      /** The game from the initial position when only `fen` is sent: not in the prompt, only boards an answer's
+       * snapshot may rewind to (the positions along it; the initial position is always one). */
+      gameMoves?: string[];
       /** Answer budget (the think budget comes on top). */
       maxTokens: number;
       /** Text sampling temperature (words only). */

@@ -4,7 +4,8 @@
 // notation / unicode / whitespace strings, chat prompts, per-side game prompts and cropped per-side board rows; and
 // tokenizer v4 (tokenizer-v4.json, format 4): the same checks plus hidden-reasoning dialogues (encode, board rows, decode);
 // line branches and end markers (the named format-4 extras: <|branch|>, <|repetition|> ...; encode, rows, decode and
-// the generation mask along each line, src/chessmind/lines.ts LineWalker), and the KV-cache slide (kv.ts moveKeys).
+// the generation mask along each line, src/chessmind/lines.ts LineWalker), the board snapshots an answer may show
+// (snapshots.ts: rewind candidates and the trie masks while one is written), and the KV-cache slide (kv.ts moveKeys).
 // Usage: node scripts/test-chessmind.mjs   (Node >= 23: imports the TypeScript sources directly)
 import { existsSync, readFileSync } from 'node:fs';
 import { ChessTokenizer } from '../src/chessmind/tokenizer.ts';
@@ -12,6 +13,7 @@ import { BoardTracker, encodeFen, encodeGameWithBoards } from '../src/chessmind/
 import { moveKeys, rowsHash, sharedPrefix } from '../src/chessmind/kv.ts';
 import { LineWatch, lineEnding, probAmong } from '../src/chessmind/lineRules.ts';
 import { LineWalker, lineVariations, movesToPath, displayLine } from '../src/chessmind/lines.ts';
+import { SnapshotPicker, dialoguePosition, rewindCandidates } from '../src/chessmind/snapshots.ts';
 
 let kvChecks = 0;
 
@@ -132,7 +134,28 @@ if (existsSync(v4Url)) {
     const sub = disp.branches.get(1);
     check('lines display', disp.chips.map((c) => c.num + c.san).join(' ') === '1.e4 e5 2.Nf3 Nc6' && sub?.length === 2 && sub[0].chips.map((c) => c.num + c.san).join(' ') === '1…c5 2.Nf3 2…d6' && sub[0].branches.get(1)?.[0].chips[0].num === '2.');
   }
-  v4Summary = `${total - before} tokenizer-v4 checks (${f4.thinking.length} thinking cases, ${(f4.branches ?? []).length} branch cases, ${(f4.walks ?? []).length} line walks)`;
+  // Snapshots (generate.rewind_candidates / SnapshotPicker): the candidate boards (as snapshot ids) and the masks
+  // while each chosen candidate is written; `legacy` = dialogue_position's two candidates (side token, then forced).
+  for (const c of f4.snapshots ?? []) {
+    const cands = rewindCandidates(c.turns, c.game_moves ?? undefined);
+    const got = cands.map((fen) => t4.encodeBoard(fen).slice(1));
+    check(`v4 snapshot candidates ${c.name}`, same(got, c.candidates), `${got.length} vs ${c.candidates.length}`);
+    const legacy = dialoguePosition(c.turns).positions;
+    check(`v4 snapshot legacy ${c.name}`, same(legacy.map((fen) => t4.encodeBoard(fen).slice(1)), c.legacy));
+    for (const w of c.walks) {
+      const p = new SnapshotPicker(t4, w.cands === 'rewind' ? cands : legacy);
+      p.begin();
+      let bad = -1;
+      let chosen = null;
+      w.ids.forEach((id, i) => {
+        if (bad < 0 && !same(p.allowed(), w.allowed[i])) bad = i;
+        chosen = p.feed(id);
+      });
+      const castling = chosen === null ? null : chosen.split(' ')[2];
+      check(`v4 snapshot walk ${c.name} ${w.cands}`, bad < 0 && castling === w.castling && !p.active, bad >= 0 ? `step ${bad}: ${p.allowed()} vs ${w.allowed[bad]}` : `castling ${castling} vs ${w.castling}`);
+    }
+  }
+  v4Summary = `${total - before} tokenizer-v4 checks (${f4.thinking.length} thinking cases, ${(f4.branches ?? []).length} branch cases, ${(f4.walks ?? []).length} line walks, ${(f4.snapshots ?? []).length} snapshot cases)`;
 }
 // KV cache slide (src/chessmind/kv.ts): keys rotated at position p, moved down by d, equal the keys rotated at p - d.
 {
