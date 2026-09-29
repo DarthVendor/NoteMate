@@ -300,5 +300,9 @@ if (mateIn1) {
 }
 check('trainer: filter by theme + band', P.filterPuzzles(set.puzzles, 'fork', '1400').every((p) => p.themes.includes('fork') && p.rating >= 1400 && p.rating < 1800));
 
+// the app-set goal for prompt-role models (ChessMind puzzle_goals.app_goal_text)
+check('app goal: mate', P.appGoalText({ kind: 'mate', n: 3 }, 'White') === 'White mates in 3.');
+check('app goal: queen / hold / best', P.appGoalText({ kind: 'queen' }, 'Black') === 'Black wins the queen.' && P.appGoalText({ kind: 'hold' }, 'White') === 'White holds the draw.' && P.appGoalText({ kind: 'best' }, 'White') === null);
+
 console.log(`${parity} prompt-parity checks (${fx.cases.length} fixture cases), mate search ${searchMs.toFixed(0)} ms; ${total - fail}/${total} passed`);
 process.exit(fail ? 1 : 0);

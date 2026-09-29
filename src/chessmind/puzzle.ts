@@ -72,6 +72,27 @@ export function goalText(goal: PuzzleGoal, side: 'White' | 'Black'): string {
   }
 }
 
+/** The app-set goal of prompt-role models (<|goal|> in the system turn; ChessMind puzzle_goals.app_goal_text):
+ * "White mates in 3." / "Black wins the queen." / "White holds the draw."; null for "best move". */
+export function appGoalText(goal: PuzzleGoal, side: 'White' | 'Black'): string | null {
+  switch (goal.kind) {
+    case 'mate':
+      return goal.n ? `${side} mates in ${goal.n}.` : `${side} mates.`;
+    case 'queen':
+      return `${side} wins the queen.`;
+    case 'piece':
+      return `${side} wins a piece.`;
+    case 'material':
+      return `${side} wins material.`;
+    case 'win':
+      return `${side} wins.`;
+    case 'hold':
+      return `${side} holds the draw.`;
+    default:
+      return null;
+  }
+}
+
 /** Short goal label for the UI ("Mate in 2", "Win the queen" ...). */
 export function goalLabel(goal: PuzzleGoal): string {
   if (goal.kind === 'mate') return goal.n ? `Mate in ${goal.n}` : 'Mate';

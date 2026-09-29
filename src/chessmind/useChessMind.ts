@@ -392,7 +392,7 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
    * sent verbatim), streaming into the chat as a user message (`label`) + answer like ask(); resolves with the final
    * answer parts (null: busy, not loaded, failed). */
   const askParts = useCallback(
-    (o: { parts: DialoguePart[]; history: DialogueTurn[]; label: string; originId: string; fen?: string; think?: ThinkMode; maxTokens?: number; maxThinkTokens?: number; temperature?: number; userId?: string; answerId?: string }): Promise<{ parts: DialoguePart[]; stopped?: boolean } | null> => {
+    (o: { parts: DialoguePart[]; history: DialogueTurn[]; label: string; originId: string; fen?: string; think?: ThinkMode; maxTokens?: number; maxThinkTokens?: number; temperature?: number; userId?: string; answerId?: string; goal?: string | null }): Promise<{ parts: DialoguePart[]; stopped?: boolean } | null> => {
       const worker = workerRef.current;
       if (!worker || status !== 'ready' || chatId.current !== null) return Promise.resolve(null);
       const id = ++reqId.current;
@@ -409,7 +409,8 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
         ],
       });
       const done = new Promise<{ parts: DialoguePart[]; stopped?: boolean } | null>((resolve) => partsWait.current.set(id, resolve));
-      worker.postMessage({ type: 'chat', id, history: o.history, prompt: o.label, parts: o.parts, maxTokens: o.maxTokens ?? CHAT_MAX_TOKENS, temperature: o.temperature ?? settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: o.think ?? settings.think, maxThinkTokens: o.maxThinkTokens ?? CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } } } satisfies ToWorker);
+      // prompt-role models (manifest prompt_roles): the system turn says [Mode: puzzle] and carries the app's goal
+      worker.postMessage({ type: 'chat', id, history: o.history, prompt: o.label, parts: o.parts, mode: 'puzzle', ...(o.goal ? { goal: o.goal } : {}), maxTokens: o.maxTokens ?? CHAT_MAX_TOKENS, temperature: o.temperature ?? settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: o.think ?? settings.think, maxThinkTokens: o.maxThinkTokens ?? CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } } } satisfies ToWorker);
       return done;
     },
     [status, dispatch, settings.think, settings.temperature, settings.lineEndAnswer, settings.lineEndThink, settings.maxLinePliesAnswer, settings.maxLinePliesThink],

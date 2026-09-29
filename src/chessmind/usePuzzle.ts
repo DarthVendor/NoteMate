@@ -17,7 +17,7 @@ import { pushHistory } from '../state/history';
 import { ROOT_ID, type GameState } from '../types';
 import { DEFAULT_ENGINE_SETTINGS, resolveEngineSource, type EngineAvailability, type EngineSettings } from '../engine/engines';
 import type { useChessMind } from './useChessMind';
-import { answerLine, detectGoal, dialogueStart, filterPuzzles, goalText, goalTurn, hintText, parseTrainerSet, retryTurns, sideName, sideOf, trainerSpec, turnText, type PuzzleGoal, type PuzzleSpec, type TrainerPuzzle, type TrainerSet } from './puzzle';
+import { answerLine, appGoalText, detectGoal, dialogueStart, filterPuzzles, goalText, goalTurn, hintText, parseTrainerSet, retryTurns, sideName, sideOf, trainerSpec, turnText, type PuzzleGoal, type PuzzleSpec, type TrainerPuzzle, type TrainerSet } from './puzzle';
 import { bestMoveAt, EvalCache, mateDepth, type MoveVerdict, verifyMateLine, verifyMove } from './puzzleVerify';
 import type { DialogueTurn } from './tokenizer';
 import { PuzzleEngine } from './puzzleEngine';
@@ -290,7 +290,7 @@ export function usePuzzle({ cm, state, dispatch, engine, orientation, flip }: Op
           ids.push(answerId);
           const turns = [...req.history, { role: 'user' as const, parts: req.parts }];
           setChatGoals((g) => ({ ...g, [userId]: { role: 'question', spec, nodeId: sess.nodeId, turns, status: 'done' }, [answerId]: { role: 'answer', spec, nodeId: sess.nodeId, turns, status: 'thinking', auto: true } }));
-          const r = await latest.current.cm.askParts({ ...req, originId: sess.nodeId, fen: spec.position, think: PUZZLE_GEN.think, maxTokens: PUZZLE_GEN.maxTokens, maxThinkTokens: PUZZLE_GEN.maxThinkTokens, temperature: PUZZLE_GEN.temperature, userId, answerId });
+          const r = await latest.current.cm.askParts({ ...req, originId: sess.nodeId, fen: spec.position, think: PUZZLE_GEN.think, maxTokens: PUZZLE_GEN.maxTokens, maxThinkTokens: PUZZLE_GEN.maxThinkTokens, temperature: PUZZLE_GEN.temperature, userId, answerId, goal: appGoalText(spec.goal, sideName(spec.position)) });
           if (r) patchGoal(answerId, { status: 'checking' });
           return r ?? { parts: [], stopped: true };
         },
