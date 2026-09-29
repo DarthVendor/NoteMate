@@ -326,7 +326,18 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
     if (settings.goalPuzzles !== false && puzzle.askGoal(text)) return;
     // A game from a custom start has no move list from the initial position: the position always goes as a snapshot
     const fenOpt = settings.aboutPosition || !uciMoves ? fen : undefined;
-    const context = !fenOpt && settings.sendMoves && uciMoves && uciMoves.length ? uciMoves : undefined;
+    // Re-send the game line only when it wasn't ALREADY sent on the immediately preceding turn: multi-turn
+    // training dialogues about one position establish the line ONCE and answer further turns -- including terse
+    // ones ("elaborate", "why", "go on") -- as plain text (chessmind/data/board_facts.py board_dialogue,
+    // grounding_drills.py followup_dialogue); putting a fresh `line` part behind a one-word follow-up is a shape
+    // training otherwise only uses to introduce a NEW position, and a likely contributor to "elaborate" coming
+    // back garbled / with an invented game (see the alignment-debug memory: a re-shown line/fen can trigger the
+    // engine-review template's "Position after N...X" opener). Only ever skips ONE turn: the very next follow-up
+    // after a skip sees no `context` on the immediately preceding turn either and sends it again, so the position
+    // is never more than one turn away from being freshly re-stated.
+    const lastUser = [...chat].reverse().find((m) => m.kind === 'model' && m.role === 'user');
+    const justSent = !fenOpt && !lastUser?.fen && lastUser?.context?.length === uciMoves?.length;
+    const context = !fenOpt && settings.sendMoves && uciMoves && uciMoves.length && !justSent ? uciMoves : undefined;
     // With a snapshot, the moves are not in the prompt but an answer may still rewind to a position along them
     const gameMoves = fenOpt && uciMoves && uciMoves.length ? uciMoves : undefined;
     // The position under discussion (the snapshot or the end of the sent line; the initial position with no moves
