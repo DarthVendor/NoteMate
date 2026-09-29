@@ -554,7 +554,10 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
             <button
               className="btn btn-ghost btn-icon btn-sm"
               onClick={() => {
-                cm.detach();
+                // a completely new conversation: no running answer, no puzzle session / attempts carried over, and
+                // the next question starts from empty KV caches
+                cm.newChat();
+                if (puzzle.open) puzzle.exit();
                 setPlaying(null);
                 dispatch({ type: 'CHAT_CLEAR' });
               }}

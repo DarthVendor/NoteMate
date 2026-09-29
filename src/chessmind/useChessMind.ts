@@ -383,7 +383,7 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
         ],
       });
       const tools = settings.tools !== 'off' ? { names: OFFERED_TOOLS, takesLine: Object.fromEntries(OFFERED_TOOLS.map((n) => [n, TOOL_SPECS[n].takesLine])), force: settings.tools === 'force' ? 'engine' : null } : undefined;
-      worker.postMessage({ type: 'chat', id, history, prompt: text, fen: opts.fen, context: opts.context, gameMoves: opts.gameMoves, contextText: opts.contextText || undefined, maxTokens: CHAT_MAX_TOKENS, temperature: settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: settings.think, maxThinkTokens: CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } }, tools } satisfies ToWorker);
+      worker.postMessage({ type: 'chat', id, ...takeFresh(), history, prompt: text, fen: opts.fen, context: opts.context, gameMoves: opts.gameMoves, contextText: opts.contextText || undefined, maxTokens: CHAT_MAX_TOKENS, temperature: settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: settings.think, maxThinkTokens: CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } }, tools } satisfies ToWorker);
     },
     [chat, status, dispatch, info?.manifest.think_chain, settings.think, settings.temperature, settings.lineEndAnswer, settings.lineEndThink, settings.maxLinePliesAnswer, settings.maxLinePliesThink, settings.tools],
   );
@@ -410,7 +410,7 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
       });
       const done = new Promise<{ parts: DialoguePart[]; stopped?: boolean } | null>((resolve) => partsWait.current.set(id, resolve));
       // prompt-role models (manifest prompt_roles): the system turn says [Mode: puzzle] and carries the app's goal
-      worker.postMessage({ type: 'chat', id, history: o.history, prompt: o.label, parts: o.parts, mode: 'puzzle', ...(o.goal ? { goal: o.goal } : {}), maxTokens: o.maxTokens ?? CHAT_MAX_TOKENS, temperature: o.temperature ?? settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: o.think ?? settings.think, maxThinkTokens: o.maxThinkTokens ?? CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } } } satisfies ToWorker);
+      worker.postMessage({ type: 'chat', id, ...takeFresh(), history: o.history, prompt: o.label, parts: o.parts, mode: 'puzzle', ...(o.goal ? { goal: o.goal } : {}), maxTokens: o.maxTokens ?? CHAT_MAX_TOKENS, temperature: o.temperature ?? settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: o.think ?? settings.think, maxThinkTokens: o.maxThinkTokens ?? CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } } } satisfies ToWorker);
       return done;
     },
     [status, dispatch, settings.think, settings.temperature, settings.lineEndAnswer, settings.lineEndThink, settings.maxLinePliesAnswer, settings.maxLinePliesThink],
@@ -443,6 +443,15 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
     if (chatId.current !== null) workerRef.current?.postMessage({ type: 'stop', id: chatId.current } satisfies ToWorker);
   }, []);
 
+  /** A new conversation (the chat's erase button): the next chat request starts from empty KV caches, so nothing of
+   * the old conversation's cached prefix is reused. */
+  const freshNext = useRef(false);
+  const takeFresh = (): { freshCache?: true } => {
+    if (!freshNext.current) return {};
+    freshNext.current = false;
+    return { freshCache: true };
+  };
+
   /** Forget the running generation (e.g. when the game, and with it the chat, is reset). */
   const detach = useCallback(() => {
     stop();
@@ -453,7 +462,12 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
     setChatBusy(false);
   }, [stop]);
 
+  const newChat = useCallback(() => {
+    detach();
+    freshNext.current = true;
+  }, [detach]);
+
   const currentPrediction = prediction && prediction.key === `${movesKey}|${contextPlies}` ? prediction : null;
 
-  return { pick, stopPicks, setSuspended, contextPlies, settings, update, models, modelsError, modelId, status, error, progress, info, prediction: currentPrediction, chatBusy, canGenerate: status === 'ready' && !chatBusy, ask, askParts, analyse, stop, detach };
+  return { pick, stopPicks, setSuspended, contextPlies, settings, update, models, modelsError, modelId, status, error, progress, info, prediction: currentPrediction, chatBusy, canGenerate: status === 'ready' && !chatBusy, ask, askParts, analyse, stop, detach, newChat };
 }
