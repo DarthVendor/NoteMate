@@ -340,6 +340,8 @@ export class BoardTracker {
   private current: BoardRow;
   private readonly starts: Set<number>;
   private readonly ends: Set<number>;
+  /** Turn tokens: <|user|>, <|assistant|> and (prompt roles) <|system|>. */
+  private readonly roles: Set<number>;
   private readonly tok: ChessTokenizer;
   private readonly endThink: number | null;
   private startFen: string | null;
@@ -392,6 +394,12 @@ export class BoardTracker {
     this.endBranch = tok.endBranchId;
     this.starts = new Set([tok.gameId, tok.lineId]);
     this.ends = new Set([tok.endLineId, tok.eosId, tok.id('<|pad|>'), tok.bosId, tok.userId, tok.assistantId]);
+    // prompt roles: <|system|> is a third role token (ChessMind boards.py BoardTracker._roles)
+    this.roles = new Set([tok.userId, tok.assistantId]);
+    if (tok.systemId !== null) {
+      this.ends.add(tok.systemId);
+      this.roles.add(tok.systemId);
+    }
   }
   feed(id: number): BoardRow {
     const row = this.feedOne(id);
@@ -528,7 +536,7 @@ export class BoardTracker {
     } else if (this.ends.has(id)) {
       if (this.pod && id === tok.endLineId && this.board && this.role !== tok.assistantId)
         this.podRow = this.enc(this.board, KIND_DISCUSSED); // a user / document line: discussed from its end
-      if (this.pod && (id === tok.userId || id === tok.assistantId)) this.role = id;
+      if (this.pod && this.roles.has(id)) this.role = id;
       this.board = null;
       this.inGame = false;
       this.gameBoard = null;

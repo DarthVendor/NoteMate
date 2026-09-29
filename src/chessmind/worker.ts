@@ -19,6 +19,7 @@ import { DEFAULT_TOOL_TIMEOUT_MS, RESULT_BUDGET, TOOL_SPECS, addToolsBlock, erro
 import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_PRIOR_THINKS, DEFAULT_MAX_THINK_TOKENS, DEFAULT_THINK_MOVE_TEMPERATURE, DEFAULT_THINK_MOVE_TOKENS, DEFAULT_THINK_MOVE_TOP_K, ORT_DIR, ORT_SCRIPT_FILE, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type PickThink, type ToWorker, type ChatTrace } from './protocol';
 import { ThinkMoveConstraint, anchorIds } from './thinkMove';
 import { fitHistory, thinkPrefixIds } from './thinkThread';
+import { PROMPT_ROLES_VERSION, promptTurns } from './roles';
 
 // Minimal typing of the onnxruntime-web globals used here.
 interface OrtTensor { data: Float32Array | BigInt64Array; dims: readonly number[]; dispose?: () => void }
@@ -701,16 +702,19 @@ async function generate(o: GenOptions): Promise<number[]> {
 async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
   const t = tok!;
   if (!t.hasText) throw new Error('this model has no text tokenizer');
+  // Prompt roles (manifest prompt_roles, roles.ts): the context blocks go into a <|context|> segment and [Tools] into
+  // the system turn when the prefix is built (below), not into the user's text
+  const roles = (manifest!.prompt_roles ?? 0) >= 1 && (manifest!.prompt_roles ?? 0) <= PROMPT_ROLES_VERSION && t.supportsRoles;
   let userParts: DialoguePart[] = [];
   if (req.parts?.length) userParts = [...req.parts];
   else {
     if (req.fen) userParts.push({ kind: 'fen', fen: req.fen });
     userParts.push({ kind: 'text', text: req.prompt });
     if (req.context?.length) userParts.push({ kind: 'line', moves: req.context });
-    if (req.contextText) userParts.push({ kind: 'text', text: req.contextText });
+    if (req.contextText && !roles) userParts.push({ kind: 'text', text: req.contextText });
   }
   const tools = req.tools?.names.length && t.supportsTools ? req.tools : null;
-  if (tools) userParts = addToolsBlock(userParts, tools.names);
+  if (tools && !roles) userParts = addToolsBlock(userParts, tools.names);
   // Models without the tool tokens cannot read earlier answers' tool calls: leave them out
   if (!t.supportsTools) req.history = req.history.map((h) => ({ ...h, parts: h.parts.filter((p) => p.kind !== 'tool') }));
   // Earlier turns take at most half the context (the rest is for the think and the answer): the earlier answers'
@@ -721,7 +725,9 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
   // at the puzzle position the answer's snapshot showed -- so nothing is anchored)
   const turns: DialogueTurn[] = req.parts?.length ? [...history, { role: 'user', parts: userParts }] : anchorUserLines([...history, { role: 'user', parts: userParts }]);
   // <|eos|> <|user|> ... <|assistant|>: the context every training dialogue has (the packer's separator first)
-  const prefix = t.chatPrompt(turns);
+  // (role models: <|eos|> <|system|> ... <|user|> ... <|context|> ... <|end_context|> <|assistant|>; the positions,
+  // snapshots and rows below read the same fen / line parts, which the role layout leaves where they are)
+  const prefix = t.chatPrompt(roles ? promptTurns(turns, req.parts?.length ? null : req.contextText, { mode: req.mode ?? null, tools: tools?.names ?? null, goal: req.goal ?? null }) : turns);
   const { start } = dialoguePosition(turns);
   // Snapshots may rewind: the initial position and the positions along the game (the moves when only a FEN is sent)
   const positions = rewindCandidates(turns, req.gameMoves);
@@ -742,7 +748,7 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
     endP: { ...DEFAULT_LINE_RULES.endP, ...req.lineRules?.endP },
     maxPlies: { ...DEFAULT_LINE_RULES.maxPlies, ...req.lineRules?.maxPlies },
   };
-  const lines = new LineConstraint(t, start, positions, mode === 'on' ? true : mode === 'off' ? false : null, maxThink, rules);
+  const lines = new LineConstraint(t, start, positions, mode === 'on' ? true : mode === 'off' ? false : null, maxThink, rules, roles);
   const under = positions[0];
   const toolConstraint = tools ? new ToolConstraint(lines, t, tools.names, under, maxCalls, tools.force ?? null, tools.takesLine ?? {}) : null;
   const constraint: GenConstraint = toolConstraint ?? lines;

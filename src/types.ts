@@ -86,8 +86,10 @@ export type ChatLeafPart = { kind: 'text'; text: string } | ChatLinePart | { kin
 /** ...or (first part of an assistant answer, format-4 models) hidden reasoning: `<|think|> parts <|end_think|>`. */
 export type ChatPart =
   | ChatLeafPart
-  /** `open`: no <|end_think|> yet (streaming); `tokens`: ids generated inside the think (both set by the worker). */
-  | { kind: 'think'; parts: ChatLeafPart[]; open?: boolean; tokens?: number };
+  /** `open`: no <|end_think|> yet (streaming); `tokens`: ids generated inside the think (both set by the worker).
+   * `plan`: the running plan that closes the think (`<|plan|> ... <|end_plan|>`, models with prompt roles; ChessMind
+   * chessmind/model/roles.py); a think with no `parts` and a `plan` is a carried plan (an earlier think reduced to it). */
+  | { kind: 'think'; parts: ChatLeafPart[]; plan?: ChatLeafPart[]; open?: boolean; tokens?: number };
 
 /** Where an answer's line was inserted into the move tree. */
 export interface ChatLineState {

@@ -1,6 +1,7 @@
 import type { DialoguePart, DialogueTurn } from './tokenizer';
 import type { LineRules } from './lineRules';
 import type { ChatLeafPart } from '../types';
+import type { ChatMode } from './roles';
 
 /** Default think budget: tokens of hidden reasoning before <|end_think|> is forced (as chat() in generate.py).
  * Training thinks run from ~50 to ~2,000 tokens; a whole training example fits the 2,560-token context. */
@@ -48,6 +49,10 @@ export interface ModelManifest {
   kv?: { n_layer: number; n_kv_heads: number; head_dim: number; past: string[]; new: string[]; rope_theta?: number };
   chunks: { size: number; parts: string[] };
   files: { tokenizer: string; chess_vocab: string; parts: string };
+  /** Prompt-role format version the model was trained with (ChessMind chessmind/model/roles.py; roles.ts): >= 1 = chat
+   * prompts get a system turn, the app's blocks in a <|context|> segment and the think may close with a <|plan|>.
+   * Absent / 0: the plain ctx1 layout. */
+  prompt_roles?: number;
 }
 
 /** Think budget of a think-then-move pick (think_move.DEFAULT_THINK_TOKENS in ChessMind). */
@@ -125,6 +130,9 @@ export type ToWorker =
       freshCache?: boolean;
       /** Dev tooling: send a `chat-trace` (why lines and the answer stopped, budgets) after the last update. */
       trace?: boolean;
+      /** Prompt-role models (manifest `prompt_roles`): the app mode and a goal for the system turn (roles.ts). */
+      mode?: ChatMode;
+      goal?: string;
     }
   /** The app's answer to a `tool-call`: the result text (an error result when `ok` is false). */
   | { type: 'tool-result'; id: number; call: number; text: string; ok: boolean; compact?: string[] }

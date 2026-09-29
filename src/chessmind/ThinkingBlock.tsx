@@ -15,6 +15,8 @@ import './ThinkingBlock.css';
 
 interface Props {
   parts: ChatLeafPart[];
+  /** The running plan closing the think (prompt-role models: `<|plan|> ... <|end_plan|>`, the think part's `plan`). */
+  plan?: ChatLeafPart[];
   /** No <|end_think|> yet. */
   open?: boolean;
   /** Tokens generated inside the think. */
@@ -66,11 +68,11 @@ export function LineEndNote({ fen, moves }: { fen: string | undefined; moves: st
 
 const sideOf = (fen: string) => (fen.split(' ')[1] === 'b' ? 'Black' : 'White');
 
-export function ThinkingBlock({ parts, open, tokens, done, startFen, resolveFen, budget = DEFAULT_MAX_THINK_TOKENS, renderText }: Props) {
+export function ThinkingBlock({ parts, plan, open, tokens, done, startFen, resolveFen, budget = DEFAULT_MAX_THINK_TOKENS, renderText }: Props) {
   const [expanded, setExpanded] = useState(false);
   const bodyId = useId();
   const streaming = !!open && !done;
-  const empty = parts.length === 0;
+  const empty = parts.length === 0 && !plan?.length;
   let label: string;
   if (streaming) label = 'Thinking';
   else if (open) label = 'Thinking stopped';
@@ -82,7 +84,7 @@ export function ThinkingBlock({ parts, open, tokens, done, startFen, resolveFen,
 
   // Lines start from the latest snapshot inside the think, else from startFen.
   const lineFens: (string | undefined)[] = [];
-  parts.reduce((f, p) => {
+  const planFen = parts.reduce((f, p) => {
     lineFens.push(f);
     return p.kind === 'fen' ? (resolveFen?.(p.fen) ?? p.fen) : f;
   }, startFen);
@@ -132,6 +134,15 @@ export function ThinkingBlock({ parts, open, tokens, done, startFen, resolveFen,
               </p>
             );
           })}
+          {!!plan?.length && (
+            // Plan lines start from the think's latest snapshot, else where the think started
+            <p className="cm-think-plan">
+              <strong>Plan:</strong>{' '}
+              {plan.map((p, i) =>
+                p.kind === 'text' ? <span key={i}>{p.text} </span> : p.kind === 'line' ? <span key={i}>{sanLine(planFen, p.moves)} </span> : null,
+              )}
+            </p>
+          )}
         </div>
       )}
     </div>

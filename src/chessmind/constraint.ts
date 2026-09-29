@@ -30,6 +30,10 @@ function legalUci(chess: Chess): string[] {
  * cannot end (no <|eos|> / <|user|>), <|end_think|> closes it outside a line, and after `maxThinkTokens` think
  * tokens the close is forced (<|end_line|> first when a line is open). <|end_think|> restores the line start that
  * was active before the think. A tokenizer without <|end_think|> gets exactly the old masks.
+ * `plan` (models trained with prompt roles, manifest `prompt_roles`): inside the think, outside a line and after one
+ * think token, `<|plan|>` may open the running plan (once); inside it text, lines and `<|end_plan|>` (no
+ * <|end_think|>, no snapshot); after `<|end_plan|>` only `<|end_think|>`; the budget closes the line, the plan, then
+ * the think. The prompt-only role tokens (system / context / goal) are never in any mask.
  */
 export class LineConstraint implements GenConstraint {
   /** The open line (its board, plies and repetitions). */
@@ -53,7 +57,14 @@ export class LineConstraint implements GenConstraint {
   private thinkTokens = 0;
   private outerStart: string | undefined;
   private seen = 0;
-  constructor(t: ChessTokenizer, start?: string, positions: string[] = [], think: boolean | null = null, maxThinkTokens: number | null = null, rules: LineRules = DEFAULT_LINE_RULES) {
+  /** The running plan (prompt roles): its token ids when allowed, and where the think is with it. */
+  private readonly planId: number | null;
+  private readonly endPlanId: number | null;
+  private readonly planTextMask: number[] = [];
+  private readonly thinkPlanMask: number[] = [];
+  private inPlan = false;
+  private planDone = false;
+  constructor(t: ChessTokenizer, start?: string, positions: string[] = [], think: boolean | null = null, maxThinkTokens: number | null = null, rules: LineRules = DEFAULT_LINE_RULES, plan = false) {
     this.t = t;
     this.rules = rules;
     this.start = start;
@@ -68,6 +79,17 @@ export class LineConstraint implements GenConstraint {
     if (this.snapshots.size) base.push(t.fenId);
     this.textMask = [...base, t.eosId, t.userId];
     this.thinkTextMask = this.endThink !== null ? [...base, this.endThink] : base;
+    this.planId = plan && t.supportsRoles && this.endThink !== null ? t.planId : null;
+    this.endPlanId = this.planId !== null ? t.endPlanId : null;
+    if (this.planId !== null) {
+      for (let i = t.textOffset; i < t.extraOffset; i++) this.planTextMask.push(i);
+      this.planTextMask.push(t.lineId, this.endPlanId!);
+      this.thinkPlanMask = [...this.thinkTextMask, this.planId];
+    }
+  }
+  /** Inside the running plan (prompt roles). */
+  get planning(): boolean {
+    return this.inPlan;
   }
   /** Where a line would start now (undefined = the initial position). */
   get lineStart(): string | undefined {
@@ -84,6 +106,17 @@ export class LineConstraint implements GenConstraint {
   private feedOne(id: number, index: number) {
     const t = this.t;
     if (this.inThink) this.thinkTokens++;
+    if (this.planId !== null && this.inThink && this.line === null && !this.snapshots.active) {
+      if (id === this.planId && !this.inPlan) {
+        this.inPlan = true;
+        return;
+      }
+      if (id === this.endPlanId && this.inPlan) {
+        this.inPlan = false;
+        this.planDone = true;
+        return;
+      }
+    }
     if (this.snapshots.active) {
       const chosen = this.snapshots.feed(id);
       if (chosen !== null) this.start = this.shown = chosen;
@@ -97,6 +130,7 @@ export class LineConstraint implements GenConstraint {
     }
     if (this.inThink && id === this.endThink) {
       this.inThink = false;
+      this.inPlan = this.planDone = false;
       this.start = this.outerStart;
       this.shown = this.outerShown;
       this.line = null;
@@ -142,6 +176,11 @@ export class LineConstraint implements GenConstraint {
       if (over) return [t.endLineId];
       if (this.line.plies >= max || (this.rules.stopFinished && this.line.ended())) return [t.endLineId];
       return [...legalUci(this.line.board).map((m) => t.moveToId(m)), t.endLineId];
+    }
+    if (this.inThink && this.planId !== null) {
+      if (this.planDone) return [this.endThink!];
+      if (this.inPlan) return over ? [this.endPlanId!] : this.planTextMask;
+      if (!over && this.thinkTokens >= 1) return this.thinkPlanMask; // a plan closes reasoning: never the first token
     }
     if (this.inThink) return over ? [this.endThink!] : this.thinkTextMask;
     return this.textMask;
