@@ -44,6 +44,9 @@ export interface ModelManifest {
   /** In-game thinks close with the running plan <|plan|> ... <|end_plan|> (ChessMind think_chain plan_part): the think
    * pick allows it (thinkMove.ts) and earlier thinks shrink to their plan before they leave the context. */
   think_plan?: boolean;
+  /** Trained with whose-side prompts (ChessMind data.perspective): the app sends `[You: White|Black]` and anchors think
+   * picks with "I'm playing White, and it's my move." only then; older models never saw either. */
+  user_side?: boolean;
   /** Text tokenizer format (2 = GPT-2 split; 3 = chess-notation split + prefix space; 4 = 3 + <|end_think|>). */
   tokenizer_format?: number;
   quant: string;

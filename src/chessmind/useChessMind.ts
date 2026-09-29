@@ -341,12 +341,12 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
           temperature,
           contextPlies: simContext,
           ...(think
-            ? { think, anchor: settings.thinkAnchor, maxThinkTokens: opts.maxThinkTokens, lineTemperature: DEFAULT_LINE_TEMPERATURE, lineRules: { endP: { think: settings.lineEndThink }, maxPlies: { think: settings.maxLinePliesThink } }, ...(opts.thinks && info?.manifest.think_chain ? { thinks: opts.thinks } : {}) }
+            ? { think, anchor: settings.thinkAnchor && !!info?.manifest.user_side, maxThinkTokens: opts.maxThinkTokens, lineTemperature: DEFAULT_LINE_TEMPERATURE, lineRules: { endP: { think: settings.lineEndThink }, maxPlies: { think: settings.maxLinePliesThink } }, ...(opts.thinks && info?.manifest.think_chain ? { thinks: opts.thinks } : {}) }
             : {}),
         } satisfies ToWorker);
       });
     },
-    [status, contextPlies, info?.manifest.boards, info?.manifest.think_chain, settings.lineEndThink, settings.maxLinePliesThink, settings.thinkAnchor],
+    [status, contextPlies, info?.manifest.boards, info?.manifest.think_chain, settings.lineEndThink, settings.maxLinePliesThink, settings.thinkAnchor, info?.manifest.user_side],
   );
 
   /** Stop the running picks (a think pick answers with no move). */

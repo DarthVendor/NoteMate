@@ -301,7 +301,8 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
           sendCandidates: settings.candidatesContext,
           // [You: White|Black]: the "I'm playing" setting, or (auto) Simulate's non-model colour while a Simulate run
           // is going (running / paused), else the board orientation (chatContext.ts userSide documents the rule)
-          you: userSide(settings.userSide ?? 'auto', { orientation: app?.orientation ?? 'white', simModelColor: app && app.sim.phase !== 'idle' ? (app.sim.live?.modelColor ?? null) : null }),
+          // (models trained with it only: manifest user_side; v6 s20k and older never saw a [You] block)
+          you: info?.manifest.user_side ? userSide(settings.userSide ?? 'auto', { orientation: app?.orientation ?? 'white', simModelColor: app && app.sim.phase !== 'idle' ? (app.sim.live?.modelColor ?? null) : null }) : null,
         })
       : '';
     cm.ask(text, { originId: state.currentId, fen: fenOpt, context, gameMoves, contextText });
