@@ -9,6 +9,7 @@ import { ChessTokenizer } from '../src/chessmind/tokenizer.ts';
 import { BoardTracker } from '../src/chessmind/boards.ts';
 import { DEFAULT_LINE_RULES } from '../src/chessmind/lineRules.ts';
 import { ThinkMoveConstraint } from '../src/chessmind/thinkMove.ts';
+import { fitHistory, thinkPrefixIds } from '../src/chessmind/thinkThread.ts';
 
 const fx = JSON.parse(readFileSync(new URL('../src/chessmind/fixtures/think-move.json', import.meta.url), 'utf8'));
 const tv = JSON.parse(readFileSync(new URL('../src/chessmind/fixtures/tokenizer-v4.json', import.meta.url), 'utf8'));
@@ -80,6 +81,22 @@ for (const w of fx.walks) {
   const t3 = new ChessTokenizer(t3v.chess_vocab, t3v.bpe);
   const c = new ThinkMoveConstraint(t3, undefined, true);
   check('no <|end_think|>: think ignored', c.think === false && c.allowedIds().length === 20 && !c.allowedIds().includes(t3.thinkId));
+}
+
+// (d) the running thread (ChessMind think_move.prompt_with_thinks / generate.fit_history): think-pick prompts with the
+// earlier thinks (oldest dropped to fit, max prior, other side's thinks ignored) and chat histories fitted with the
+// earlier answers' thinks dropped first
+if (fx.chain) {
+  const thinks = Object.fromEntries(Object.entries(fx.chain.thinks).map(([k, v]) => [Number(k), v]));
+  for (const p of fx.chain.prompts) {
+    const got = thinkPrefixIds(tok, p.moves, thinks, { k: null, reserve: p.reserve, limit: p.limit ?? Infinity, perspectiveGames: true, maxPrior: p.max_prior });
+    check(`chain prompt ${p.name} (${p.ids.length} tokens)`, same(got.ids, p.ids), `${got.ids.length} vs ${p.ids.length} tokens`);
+  }
+  for (const h of fx.chain.histories) {
+    const fitted = fitHistory(tok, h.history, h.user.parts, h.limit);
+    const prompt = tok.chatPrompt([...fitted, h.user]);
+    check(`chain history ${h.name}`, same(fitted, h.fitted) && same(prompt, h.prompt), `${JSON.stringify(fitted.map((t) => t.parts.map((q) => q.kind)))} vs ${JSON.stringify(h.fitted.map((t) => t.parts.map((q) => q.kind)))}; ${prompt.length} vs ${h.prompt.length}`);
+  }
 }
 
 console.log(`${fx.sequences.length} row sequences, ${fx.walks.length} walks: ${total - fail}/${total} think-move checks passed`);

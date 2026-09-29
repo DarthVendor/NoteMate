@@ -554,6 +554,17 @@ export class BoardTracker {
   }
 }
 
+/** FEN of the position after `moves[0..start)` from `initialFen` as a cropped training instance's start position
+ * (the en-passant square set whenever the tracker has one, as ChessMind's `fen(en_passant="fen")`). */
+export function cropStartFen(moves: string[], start: number, initialFen?: string): string | undefined {
+  if (start <= 0) return initialFen;
+  const board = new TrackedBoard(initialFen);
+  for (let i = 0; i < start; i++) if (!board.push(moves[i])) throw new Error(`illegal move ${moves[i]}`);
+  const f = board.chess.fen().split(' ');
+  f[3] = board.ep === null ? '-' : `${FILES[board.ep]}${board.chess.turn() === 'w' ? 6 : 3}`;
+  return f.join(' ');
+}
+
 /**
  * `<|game|>` + the last `k` moves, the game token carrying the board at the crop point (so the model sees
  * the real position while attending over k + 1 tokens). k = null: the whole game. With a perspective

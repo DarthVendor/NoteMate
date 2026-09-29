@@ -10,8 +10,8 @@
  */
 import { Chess } from 'chess.js';
 import ChessMindWorker from './worker.ts?worker&inline';
-import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, type Backend, type ChatTrace, type FromWorker, type ModelManifest, type ThinkMode, type ToWorker } from './protocol';
-import { splitThink, type DialogueTurn } from './tokenizer';
+import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, DEFAULT_THINK_MOVE_TOKENS, type Backend, type ChatTrace, type FromWorker, type ModelManifest, type ThinkMode, type ToWorker } from './protocol';
+import { historyParts, splitThink, type DialogueTurn } from './tokenizer';
 import type { ChatLeafPart, ChatMessage, ChatPart, GameState, MoveNode } from '../types';
 import { ROOT_ID } from '../types';
 import { OFFERED_TOOLS, TOOL_SPECS, engineToolResult, errorText, type ToolResultData } from './tools';
@@ -49,6 +49,8 @@ export interface DevAskOptions {
   /** With `moves` and no `fen`: ask about the position after them as a snapshot (the panel's "about position"). */
   aboutPosition?: boolean;
   history?: DevTurn[];
+  /** Earlier answers keep their think in the history (default: the model's manifest think_chain, as the panel). */
+  keepThinks?: boolean;
   think?: ThinkMode;
   temperature?: number;
   topK?: number;
@@ -284,6 +286,49 @@ class DevChessMind {
     }
   }
 
+  /**
+   * Think-then-move along a given game (teacher-forced: the game's moves are played whatever the model picks): at
+   * each of `plies` (the side to move's own plies) the model thinks and picks, with its earlier thinks of this call
+   * in the prompt when `keep` (default true: the running thread, as Simulate plays) -- the chain-coherence battery.
+   */
+  async thinkGame(o: { moves: MovesInput; plies: number[]; keep?: boolean; think?: ThinkMode; seed?: number; temperature?: number; maxThinkTokens?: number; maxPriorThinks?: number; contextPlies?: number | null; model?: string; timeoutMs?: number }) {
+    const worker = await this.ensure(o.model);
+    const moves = parseMoves(o.moves);
+    const thinks: Record<number, number[]> = {};
+    const rows: { ply: number; fen: string; played: string; picked: string | null; think: string | null; raw?: string; tokens: number; open: boolean; promptTokens: number; kept: number; ms: number }[] = [];
+    for (const ply of [...o.plies].sort((a, b) => a - b)) {
+      if (ply < 0 || ply >= moves.length) continue;
+      const prefix = moves.slice(0, ply);
+      const fen = fenAfter(prefix);
+      const id = ++this.reqId;
+      const t0 = performance.now();
+      const kept = o.keep === false ? 0 : Object.keys(thinks).filter((p) => Number(p) % 2 === ply % 2).length;
+      const r = await new Promise<Extract<FromWorker, { type: 'picked' }>>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('timeout')), o.timeoutMs ?? 300_000);
+        this.listeners.set(id, (m) => {
+          if (m.type === 'picked') {
+            clearTimeout(timer);
+            resolve(m);
+          } else if (m.type === 'error') {
+            clearTimeout(timer);
+            reject(new Error(m.message));
+          }
+        });
+        worker.postMessage({
+          type: 'pick', id, moves: prefix, temperature: o.temperature ?? 0, contextPlies: o.contextPlies ?? null, think: o.think ?? 'on',
+          maxThinkTokens: o.maxThinkTokens ?? DEFAULT_THINK_MOVE_TOKENS, lineTemperature: DEFAULT_LINE_TEMPERATURE, seed: o.seed ?? 1,
+          ...(o.keep === false ? {} : { thinks: { ...thinks }, maxPriorThinks: o.maxPriorThinks }),
+        } satisfies ToWorker);
+      }).finally(() => this.listeners.delete(id));
+      if (r.think?.ids) thinks[ply] = r.think.ids;
+      rows.push({
+        ply, fen, played: moves[ply], picked: r.uci, think: r.think ? thinkPlain(r.think.parts, fen) : null, raw: r.think?.raw, tokens: r.think?.tokens ?? 0,
+        open: !!r.think?.open, promptTokens: r.tokens - (r.think?.ids?.length ?? 0) - 1, kept, ms: Math.round(performance.now() - t0),
+      });
+    }
+    return { model: this.modelId, moves, keep: o.keep !== false, rows };
+  }
+
   async ask(o: DevAskOptions): Promise<DevAnswer> {
     const worker = await this.ensure(o.model);
     const model = this.modelId!;
@@ -294,10 +339,11 @@ class DevChessMind {
     const context = !fen && moves.length ? moves : undefined;
     const gameMoves = fen && moves.length ? moves : undefined;
     this.game = notesGame(moves, o.notes);
-    // Earlier turns as the panel sends them: user = snapshot + text, assistant = the answer without its think
+    // Earlier turns as the panel sends them: user = snapshot + text, assistant = the answer with its think (unless
+    // keepThinks is false)
     const history: DialogueTurn[] = (o.history ?? []).map((h) => {
       const parts: ChatPart[] = h.parts ?? [{ kind: 'text', text: h.text ?? '' }];
-      if (h.role === 'assistant') return { role: 'assistant', parts: splitThink(parts).answer };
+      if (h.role === 'assistant') return { role: 'assistant', parts: historyParts(parts, o.keepThinks ?? !!this.info?.manifest.think_chain) };
       return { role: 'user', parts: h.fen && !parts.some((p) => p.kind === 'fen') ? [{ kind: 'fen', fen: h.fen }, ...parts] : parts };
     });
     // The context part
@@ -462,10 +508,19 @@ class DevChessMind {
       lines,
       tools,
       flags,
-      history: [...a.inHistory, userTurn, { role: 'assistant', text: answer, parts: answerParts }],
+      history: [...a.inHistory, userTurn, { role: 'assistant', text: answer, parts: historyParts(a.parts, true) as ChatPart[] }],
       ...(a.error ? { error: a.error } : {}),
     };
   }
+}
+
+/** A think's parts as plain text (lines in SAN from `fen`), for the chain battery's scorer. */
+function thinkPlain(parts: ChatLeafPart[], fen: string): string {
+  return parts
+    .map((p) => (p.kind === 'text' ? p.text : p.kind === 'line' ? `[${safeLine(p, fen)}]` : ''))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function safeLine(line: Parameters<typeof lineText>[0], fen?: string): string {
@@ -493,6 +548,7 @@ export function installDevHook() {
     current: () => ({ model: dev.modelId, backend: dev.info?.backend ?? null, threads: dev.info?.threads ?? null }),
     ask: (o: DevAskOptions) => dev.ask(o),
     predict: (o: { fen?: string; moves?: MovesInput; top?: number; contextPlies?: number | null; model?: string }) => dev.predict(o),
+    thinkGame: (o: Parameters<DevChessMind['thinkGame']>[0]) => dev.thinkGame(o),
   };
   (window as unknown as { __chessmind: typeof api }).__chessmind = api;
   document.documentElement.dataset.chessmindDev = 'ready';

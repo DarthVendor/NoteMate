@@ -318,6 +318,9 @@ export function useSimulate(opts: {
         const startFen = chess.fen();
         const moves = [...prefix];
         const gameMoves: string[] = [];
+        // The running thread: ChessMind's thinks so far in this game ({index in moves: ids}), fed back into its next
+        // think picks as training shows them (ChessMind data.think_chain; the worker drops the oldest to fit)
+        const thinks: Record<number, number[]> = {};
         const trace: SimMoveTrace[] = [];
         let pending: Omit<SimMoveTrace, 'san' | 'ply'> | null = null;
         const sans: string[] = [];
@@ -365,9 +368,11 @@ export function useSimulate(opts: {
               think: s.think,
               maxThinkTokens: s.thinkTokens,
               onThink: (think) => setThought({ fen, ply, san: null, think }),
+              thinks,
             });
             const wall = performance.now() - t0;
             uci = r.uci;
+            if (r.think?.ids && r.uci) thinks[moves.length] = r.think.ids;
             if (s.think !== 'off') setThought(r.think ? { fen, ply, san: null, think: r.think } : null);
             pending = {
               fen, side: 'model', uci: r.uci ?? '', p: r.p, ms: Math.round(wall),

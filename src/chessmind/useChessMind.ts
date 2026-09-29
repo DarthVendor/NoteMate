@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ChessMindWorker from './worker.ts?worker&inline';
 import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type PickThink, type ThinkMode, type ToWorker } from './protocol';
-import { splitThink, type DialogueTurn } from './tokenizer';
+import { historyParts, type DialogueTurn } from './tokenizer';
 import type { ChatMessage } from '../types';
 import { DEFAULT_LINE_RULES } from './lineRules';
 import type { GameAction } from '../state/gameReducer';
@@ -81,6 +81,9 @@ export interface PickOptions {
   think?: ThinkMode;
   maxThinkTokens?: number;
   onThink?: (think: PickThink) => void;
+  /** The model's earlier thinks in this game ({ply: PickThink.ids}): kept in the think pick's prompt (the running
+   * thread, as training shows it). */
+  thinks?: Record<number, number[]>;
 }
 
 export type ChessMindStatus = 'off' | 'loading' | 'ready' | 'error';
@@ -326,12 +329,12 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
           temperature,
           contextPlies: simContext,
           ...(think
-            ? { think, anchor: settings.thinkAnchor, maxThinkTokens: opts.maxThinkTokens, lineTemperature: DEFAULT_LINE_TEMPERATURE, lineRules: { endP: { think: settings.lineEndThink }, maxPlies: { think: settings.maxLinePliesThink } } }
+            ? { think, anchor: settings.thinkAnchor, maxThinkTokens: opts.maxThinkTokens, lineTemperature: DEFAULT_LINE_TEMPERATURE, lineRules: { endP: { think: settings.lineEndThink }, maxPlies: { think: settings.maxLinePliesThink } }, ...(opts.thinks && info?.manifest.think_chain ? { thinks: opts.thinks } : {}) }
             : {}),
         } satisfies ToWorker);
       });
     },
-    [status, contextPlies, info?.manifest.boards, settings.lineEndThink, settings.maxLinePliesThink, settings.thinkAnchor],
+    [status, contextPlies, info?.manifest.boards, info?.manifest.think_chain, settings.lineEndThink, settings.maxLinePliesThink, settings.thinkAnchor],
   );
 
   /** Stop the running picks (a think pick answers with no move). */
@@ -347,10 +350,12 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
       if (!worker || status !== 'ready' || chatId.current !== null || !text) return;
       const turns = HISTORY_TURNS > 0 ? chat.filter((m) => m.kind === 'model' && (m.role === 'user' || m.parts.length > 0)).slice(-HISTORY_TURNS) : [];
       if (turns[0]?.role === 'assistant') turns.shift();
-      // Earlier answers without their hidden reasoning, as in training data.
+      // Earlier answers WITH their hidden reasoning for models trained on chained thinks (the running thread:
+      // ChessMind's chain-chat dialogues keep the earlier thinks, so the next think continues from them; the worker
+      // drops the oldest thinks first to fit); older models get the answers only, as in their training data.
       const history: DialogueTurn[] = turns.map((m) => ({
         role: m.role,
-        parts: m.role === 'user' && m.fen ? [{ kind: 'fen', fen: m.fen }, ...m.parts] : splitThink(m.parts).answer,
+        parts: m.role === 'user' && m.fen ? [{ kind: 'fen', fen: m.fen }, ...m.parts] : historyParts(m.parts, !!info?.manifest.think_chain),
       }));
       const id = ++reqId.current;
       const answerId = newId();
@@ -368,7 +373,7 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
       const tools = settings.tools !== 'off' ? { names: OFFERED_TOOLS, takesLine: Object.fromEntries(OFFERED_TOOLS.map((n) => [n, TOOL_SPECS[n].takesLine])), force: settings.tools === 'force' ? 'engine' : null } : undefined;
       worker.postMessage({ type: 'chat', id, history, prompt: text, fen: opts.fen, context: opts.context, gameMoves: opts.gameMoves, contextText: opts.contextText || undefined, maxTokens: CHAT_MAX_TOKENS, temperature: settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: settings.think, maxThinkTokens: CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } }, tools } satisfies ToWorker);
     },
-    [chat, status, dispatch, settings.think, settings.temperature, settings.lineEndAnswer, settings.lineEndThink, settings.maxLinePliesAnswer, settings.maxLinePliesThink, settings.tools],
+    [chat, status, dispatch, info?.manifest.think_chain, settings.think, settings.temperature, settings.lineEndAnswer, settings.lineEndThink, settings.maxLinePliesAnswer, settings.maxLinePliesThink, settings.tools],
   );
 
   /** Top moves for the position after `movesUci` plus a short explanation from the model. */

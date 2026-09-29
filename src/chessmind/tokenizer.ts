@@ -140,6 +140,15 @@ export function splitThink(parts: DialoguePart[]): { think: ChatLeafPart[]; answ
   return { think, answer, thought };
 }
 
+/** An earlier answer as history for the next question: its closed think first when `keepThink` (the running thread:
+ * ChessMind's chain-chat training dialogues keep the earlier answers' thinks), else the answer only. Python:
+ * generate.history_turn. */
+export function historyParts(parts: DialoguePart[], keepThink = true): DialoguePart[] {
+  const { think, answer } = splitThink(parts);
+  const closed = parts.some((p) => p.kind === 'think' && !p.open);
+  return keepThink && closed ? [{ kind: 'think', parts: think }, ...answer] : answer;
+}
+
 export class ChessTokenizer {
   readonly special: string[];
   readonly moves: string[];

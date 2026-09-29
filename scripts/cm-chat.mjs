@@ -11,6 +11,10 @@
 //   node scripts/cm-chat.mjs --predict --moves "e4 e5 Nf3"   |  --predict --fen F      # move chips (top moves)
 //   node scripts/cm-chat.mjs --batch scripts/cm-battery.jsonl --models v5-250m-s95k,v5-250m-s30k --seeds 1 \
 //        --out /tmp/run.jsonl                              # + /tmp/run.md (side-by-side summary)
+//   node scripts/cm-chat.mjs --think-game chain.jsonl --model v5-250m-v6-s20k --keep both --out /tmp/chain.jsonl
+//        # think-then-move along given games (teacher-forced) at consecutive own plies, with the earlier thinks in the
+//        # prompt (--keep on), without (off) or both; items {id, moves: [uci...], plies: [...]} (ChessMind's
+//        # scripts/think_chain_eval.py battery writes them and scores the output)
 //   node scripts/cm-chat.mjs --summarize a.jsonl,b.jsonl [--summary out.md]          # markdown from results files
 //   node scripts/cm-chat.mjs --daemon &                     # keep one browser + loaded model; later calls reuse it
 //   node scripts/cm-chat.mjs --stop-daemon
@@ -62,6 +66,8 @@ const { values: opt, positionals } = parseArgs({
     summary: { type: 'string' },
     summarize: { type: 'string' },
     predict: { type: 'boolean' },
+    'think-game': { type: 'string' },
+    keep: { type: 'string' },
     top: { type: 'string' },
     pretty: { type: 'boolean' },
     full: { type: 'boolean' },
@@ -481,6 +487,33 @@ async function daemon() {
 }
 
 // -------------------------------------------------------------------------------------------------- main
+/** --think-game: every item at every --keep mode, one JSON line per (item, mode) in --out (or stdout). */
+async function thinkGames(s) {
+  const items = readFileSync(opt['think-game'], 'utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
+  const modes = (opt.keep ?? 'on') === 'both' ? [true, false] : [(opt.keep ?? 'on') !== 'off'];
+  const models = (opt.models ?? opt.model ?? DEFAULT_MODEL).split(',').map((m) => m.trim());
+  if (opt.out) writeFileSync(opt.out, '');
+  for (const model of models) {
+    await ensureModel(s, model);
+    for (const it of items) {
+      for (const keep of modes) {
+        const t0 = Date.now();
+        let r;
+        try {
+          r = await s.call('thinkGame', { moves: it.moves, plies: it.plies, keep, seed: num(opt.seed, 1), temperature: num(opt.temp, 0),
+            maxThinkTokens: opt['max-think'] ? num(opt['max-think'], 384) : undefined, timeoutMs: num(opt.timeout, 300) * 1000 });
+        } catch (e) {
+          r = { model, error: e.message, rows: [] };
+        }
+        const line = JSON.stringify({ id: it.id, model, keep, ...r, ms: Date.now() - t0 });
+        if (opt.out) appendFileSync(opt.out, line + '\n');
+        else console.log(line);
+        log(`${model} ${it.id} keep=${keep}: ${r.rows?.length ?? 0} thinks in ${((Date.now() - t0) / 1000).toFixed(0)} s`);
+      }
+    }
+  }
+}
+
 async function main() {
   if (opt['stop-daemon']) {
     const up = await daemonAlive();
@@ -504,7 +537,8 @@ async function main() {
   };
   process.on('SIGINT', stop);
   try {
-    if (opt.batch) await batch(s);
+    if (opt['think-game']) await thinkGames(s);
+    else if (opt.batch) await batch(s);
     else if (opt.repl) await repl(s);
     else await single(s);
   } finally {
