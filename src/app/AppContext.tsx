@@ -50,9 +50,16 @@ export interface AppCtx {
   openImport: () => void;
   exportPgn: (text?: string) => void;
   newGame: () => void;
+  /** Start a new game from a FEN (validated; false if invalid), optionally shown from `orientation`. */
+  setPosition: (fen: string, orientation?: Orientation) => boolean;
+  /** Open the Set position dialog (FEN, board editor, current board). */
+  openSetPosition: () => void;
   openPalette: () => void;
   openShortcuts: () => void;
 }
+
+/** Fired on window when the game is replaced by a new one (New game, Set position): an open puzzle session closes. */
+export const GAME_RESET_EVENT = 'notemate:game-reset';
 
 export const AppContext = createContext<AppCtx | null>(null);
 

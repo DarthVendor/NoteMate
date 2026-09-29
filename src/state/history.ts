@@ -1,5 +1,6 @@
 import type { GameState } from '../types';
 import { ROOT_ID } from '../types';
+import { isStandardStart } from './position';
 
 /**
  * Games put aside when another one is imported (e.g. from chess.com), newest first, so an import never loses
@@ -16,9 +17,9 @@ export interface SavedGame {
 }
 
 export function gameTitle(state: GameState): string {
-  const { white, black, date } = state.meta;
+  const { white, black, date, event } = state.meta;
   const moves = Math.ceil(countMainLine(state) / 2);
-  const who = white || black ? `${white ?? '?'} – ${black ?? '?'}` : 'Analysis board';
+  const who = white || black ? `${white ?? '?'} – ${black ?? '?'}` : event || (isStandardStart(state.startFen) ? 'Analysis board' : 'Custom position');
   return [who, date?.replace(/\.\?\?/g, ''), `${moves} move${moves === 1 ? '' : 's'}`].filter(Boolean).join(' · ');
 }
 
@@ -54,10 +55,10 @@ function saveHistory(list: SavedGame[]) {
   }
 }
 
-/** Keep `state` in the history (unless it has no moves and no notes). Returns the new list. */
+/** Keep `state` in the history (unless it has no moves and no notes from the standard start). Returns the new list. */
 export function pushHistory(state: GameState): SavedGame[] {
   const list = loadHistory();
-  const empty = Object.keys(state.nodes).length <= 1 && !state.nodes[ROOT_ID].annotation;
+  const empty = Object.keys(state.nodes).length <= 1 && !state.nodes[ROOT_ID].annotation && isStandardStart(state.startFen);
   if (empty) return list;
   const entry: SavedGame = { id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, title: gameTitle(state), savedAt: Date.now(), state };
   const next = [entry, ...list].slice(0, HISTORY_LIMIT);

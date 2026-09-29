@@ -22,13 +22,14 @@ import { positionAt, resolveLine } from '../state/gameReducer';
 import { newId } from '../state/pgn';
 import { ROOT_ID, type ChatLinePart, type ChatLineState, type ChatMessage, type GameState } from '../types';
 import { ProgressBar, Segmented } from '../ui/primitives';
-import { AppContext } from '../app/AppContext';
+import { AppContext, GAME_RESET_EVENT } from '../app/AppContext';
 import { MIN_ENGINE_DEPTH, chatContext, contextLabel, engineInfoFor, messageMarks, userSide, type MessageMarks } from './chatContext';
 import { MarkedText } from './MarkedText';
 import { Target as PuzzleIcon } from 'lucide-react';
 import { GoalCheck, PuzzlePanel } from './PuzzlePanel';
 import { usePuzzle } from './usePuzzle';
 import { goalLabel, parseGoal } from './puzzle';
+import { checkFen } from '../state/position';
 
 type ChessMindState = ReturnType<typeof useChessMind>;
 
@@ -78,6 +79,8 @@ const SLASH: { insert: string; desc: string; run?: boolean }[] = [
   { insert: 'puzzle', desc: 'Puzzle mode: solve this position (or the Lichess trainer)', run: true },
   { insert: 'puzzle mate 2', desc: 'Puzzle with a goal: mate N, win queen, piece, material, win, draw, best' },
   { insert: 'new game', desc: 'Start over (clears the chat)', run: true },
+  { insert: 'position', desc: 'Set up a position: FEN, board editor, or the current board as the start', run: true },
+  { insert: 'fen ', desc: 'Start a new game from a FEN (/fen alone shows this position\'s FEN)' },
 ];
 
 export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFlip, above }: Props) {
@@ -96,6 +99,16 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
   const engine = app?.engine;
   // Puzzle mode (usePuzzle.ts / PuzzlePanel.tsx): the panel above the transcript, /puzzle and the header chip
   const puzzle = usePuzzle({ cm, state, dispatch, engine, orientation: app?.orientation, flip: onFlip });
+  // The game was replaced (New game, Set position): an open puzzle session and a play-through end with it.
+  const { open: puzzleOpen, exit: exitPuzzle } = puzzle;
+  useEffect(() => {
+    const onReset = () => {
+      if (puzzleOpen) exitPuzzle();
+      setPlaying(null);
+    };
+    window.addEventListener(GAME_RESET_EVENT, onReset);
+    return () => window.removeEventListener(GAME_RESET_EVENT, onReset);
+  }, [puzzleOpen, exitPuzzle]);
   // Claim checker marks per finished answer (cached per message object: patches replace only the patched message).
   const marks = useMemo(() => {
     const out = new Map<string, MessageMarks>();
@@ -252,6 +265,22 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
     if (!text) return;
     setPrompt('');
     setSlashSel(0);
+    // /position opens the Set position dialog; /fen shows this position's FEN, /fen <FEN> starts a new game from it
+    const setup = slashed ? /^(?:position|set ?position|set ?up|fen)\b\s*(.*)$/i.exec(text) : null;
+    if (setup) {
+      const arg = setup[1].trim();
+      if (!/^fen\b/i.test(text) && !arg) {
+        if (!app) return echo(text, 'Setting up a position needs the app.');
+        app.openSetPosition();
+        return;
+      }
+      if (!arg) return echo(text, `FEN of this position: ${fen}`);
+      if (!app) return echo(text, 'Setting up a position needs the app.');
+      const ok = checkFen(arg);
+      if (!ok.ok) return echo(text, `That FEN can't start a game: ${ok.error}`);
+      app.setPosition(ok.fen);
+      return;
+    }
     const pz = (slashed || /^puzzle$/i.test(text)) && /^puzzle\b/i.test(text) ? parseGoal(text.slice(6)) : false;
     if (pz !== false) {
       if (pz === undefined) return echo(text, 'Puzzle goals: mate N, win queen, piece, material, win, draw, best.');
@@ -295,7 +324,8 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
     // A goal statement ("White has checkmate in 2"): the puzzle layout (the user's words as the goal, the position,
     // think on, no engine / candidates block) and the answer checked (usePuzzle.ts askGoal)
     if (settings.goalPuzzles !== false && puzzle.askGoal(text)) return;
-    const fenOpt = settings.aboutPosition ? fen : undefined;
+    // A game from a custom start has no move list from the initial position: the position always goes as a snapshot
+    const fenOpt = settings.aboutPosition || !uciMoves ? fen : undefined;
     const context = !fenOpt && settings.sendMoves && uciMoves && uciMoves.length ? uciMoves : undefined;
     // With a snapshot, the moves are not in the prompt but an answer may still rewind to a position along them
     const gameMoves = fenOpt && uciMoves && uciMoves.length ? uciMoves : undefined;

@@ -38,7 +38,8 @@ export interface GameMeta {
   event?: string;
   date?: string;
   result?: string;
-  source?: 'manual' | 'pgn' | 'chess.com' | 'chessbase';
+  /** 'setup': a game started from a position set up by hand (the Set position dialog). */
+  source?: 'manual' | 'setup' | 'pgn' | 'chess.com' | 'chessbase';
   whiteElo?: string;
   blackElo?: string;
   /** PGN TimeControl, e.g. "600" or "180+2" (seconds + increment). */

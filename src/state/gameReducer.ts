@@ -2,6 +2,7 @@ import { Chess, DEFAULT_POSITION } from 'chess.js';
 import type { Annotation, Arrow, ChatMessage, GameReview, GameState, Highlight, MoveNode, Note, NoteColor, Square } from '../types';
 import { emptyAnnotation, ROOT_ID } from '../types';
 import { gameFromParsed, newId, parsePgn } from './pgn';
+import { gameFromFen, plyOffset } from './position';
 
 export type GameAction =
   | { type: 'MAKE_MOVE'; from: Square; to: Square; promotion?: 'q' | 'r' | 'b' | 'n' }
@@ -48,7 +49,9 @@ export type GameAction =
    * `review: null` removes the review and its notes.
    */
   | { type: 'APPLY_REVIEW'; review: GameReview | null; notes: { nodeId: string; text: string; color: NoteColor }[] }
-  | { type: 'NEW_GAME' }
+  /** A fresh game from the standard start, or from `startFen` (a set-up position; validate it first with
+   * position.ts checkFen: an invalid FEN leaves the state as it is). */
+  | { type: 'NEW_GAME'; startFen?: string }
   | { type: 'REPLACE'; state: GameState };
 
 export type EraseScope = 'variations' | 'shapes' | 'all';
@@ -89,7 +92,8 @@ export function positionAt(state: GameState, id: string): Chess {
 /** Human label for a node, e.g. "12. Nf3" or "12... Nf6". */
 export function nodeLabel(state: GameState, id: string): string {
   if (id === ROOT_ID) return 'Start';
-  const ply = nodePly(state, id);
+  // numbered from the start FEN's move number and side (a set-up position with Black to move starts at "n...")
+  const ply = nodePly(state, id) + plyOffset(state.startFen);
   const moveNumber = Math.ceil(ply / 2);
   return `${moveNumber}${ply % 2 === 1 ? '.' : '...'} ${state.nodes[id].san}`;
 }
@@ -388,8 +392,14 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       }
       return next;
     }
-    case 'NEW_GAME':
-      return initialGameState();
+    case 'NEW_GAME': {
+      if (!action.startFen) return initialGameState();
+      try {
+        return gameFromFen(action.startFen);
+      } catch {
+        return state;
+      }
+    }
     case 'REPLACE':
       return action.state;
   }

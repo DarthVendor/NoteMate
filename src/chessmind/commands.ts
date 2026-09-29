@@ -5,6 +5,7 @@
 import type { Chess } from 'chess.js';
 import type { GameAction } from '../state/gameReducer';
 import { nodeLabel, pathTo } from '../state/gameReducer';
+import { plyOffset } from '../state/position';
 import type { GameState, ShapeColor, Square } from '../types';
 import { ROOT_ID } from '../types';
 
@@ -66,7 +67,8 @@ export function parseCommand(input: string, state: GameState, chess: Chess): Com
     const moveNo = Number(m[1]);
     const black = !!m[2] && /\.\.\.|b|black/.test(m[2]);
     const byPly = /ply/.test(t);
-    const ply = byPly ? moveNo : moveNo * 2 - (black ? 0 : 1);
+    // move numbers count from the start FEN's (a set-up position may start at move 23, Black to move)
+    const ply = byPly ? moveNo : moveNo * 2 - (black ? 0 : 1) - plyOffset(state.startFen);
     // Along the current line: the path to here, then its main continuation.
     const line = pathTo(state, state.currentId).map((n) => n.id);
     let cur = node;
@@ -75,7 +77,7 @@ export function parseCommand(input: string, state: GameState, chess: Chess): Com
       line.push(cur.id);
     }
     if (ply === 0) return { actions: [{ type: 'START' }], echo: 'Went to the start position.' };
-    const target = line[ply - 1];
+    const target = ply > 0 ? line[ply - 1] : undefined;
     if (!target) return { actions: [], echo: `This line has only ${plural(line.length, 'ply')}; there is no move ${moveNo}${black ? '...' : ''}.` };
     return { actions: [{ type: 'GOTO', id: target }], echo: `Went to ${nodeLabel(state, target)}.` };
   }

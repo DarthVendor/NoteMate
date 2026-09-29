@@ -12,6 +12,7 @@ import { ThinkingBlock } from '../chessmind/ThinkingBlock';
 import { DEFAULT_THINK_MOVE_TOKENS } from '../chessmind/protocol';
 import { Segmented } from '../ui/primitives';
 import { download, exportJson } from './exportSim';
+import { isStandardStart } from '../state/position';
 
 interface Props {
   sim: ReturnType<typeof useSimulate>;
@@ -84,6 +85,10 @@ export function SimulatePanel({ sim, cm, state, dispatch, onExport }: Props) {
 
   const colorLabel = s.modelColor === 'alternate' ? 'alternating colours' : `as ${s.modelColor === 'white' ? 'White' : 'Black'}`;
   const running = phase === 'running' || phase === 'loading';
+  // ChessMind plays games from the initial position only (its moves are read from the start): a game set up from a
+  // custom position cannot be simulated, so Start / Step are off with the reason shown
+  const customStart = !isStandardStart(state.startFen);
+  const blocked = !busy && customStart;
 
   return (
     <div className="sim-panel" data-testid="sim-panel">
@@ -230,9 +235,14 @@ export function SimulatePanel({ sim, cm, state, dispatch, onExport }: Props) {
         </p>
       )}
 
+      {blocked && (
+        <p className="hint" data-testid="sim-custom-start">
+          This game starts from a set-up position. ChessMind plays only from the standard start, so Simulate is off here: use New game (or Set position → Standard start) to simulate.
+        </p>
+      )}
       <div className="sim-buttons">
         {!busy ? (
-          <button className="btn btn-sm btn-primary" onClick={sim.start} data-testid="sim-start">
+          <button className="btn btn-sm btn-primary" onClick={sim.start} disabled={blocked} title={blocked ? 'Simulate needs a game from the standard start' : undefined} data-testid="sim-start">
             <Play size={12} /> Start
           </button>
         ) : phase === 'paused' ? (
@@ -244,7 +254,7 @@ export function SimulatePanel({ sim, cm, state, dispatch, onExport }: Props) {
             <Pause size={12} /> Pause
           </button>
         )}
-        <button className="btn btn-sm btn-ghost" onClick={sim.step} disabled={phase === 'loading'} data-testid="sim-step" title="Play one move">
+        <button className="btn btn-sm btn-ghost" onClick={sim.step} disabled={phase === 'loading' || blocked} data-testid="sim-step" title="Play one move">
           <StepForward size={12} /> Step
         </button>
         <button

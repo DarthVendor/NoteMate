@@ -1,4 +1,4 @@
-import { ClipboardCopy, FilePlus2, Keyboard, LayoutTemplate, Moon, RotateCcw, Search, Settings2, Sun, Upload } from 'lucide-react';
+import { ClipboardCopy, FilePlus2, Keyboard, LayoutTemplate, Moon, RotateCcw, Search, Settings2, SquarePen, Sun, Upload } from 'lucide-react';
 import { useApp } from './AppContext';
 import { allPanels } from '../workspace/registry';
 import { hidePanel, isVisible, PRESETS, type PresetId } from '../workspace/layout';
@@ -41,6 +41,10 @@ export function TopBar({ confirmingNew, compact }: { confirmingNew: boolean; com
         <button className={`btn ${confirmingNew ? 'btn-danger' : 'btn-ghost'}`} onClick={app.newGame} title="Start a new game" data-testid="new-game">
           <FilePlus2 size={15} />
           {confirmingNew ? 'Discard this game?' : !compact && 'New'}
+        </button>
+        <button className="btn btn-ghost" onClick={app.openSetPosition} title="Set up a position: FEN, board editor, or the current board as a new game's start" data-testid="set-position-open">
+          <SquarePen size={15} />
+          {!compact && 'Set position'}
         </button>
       </nav>
 

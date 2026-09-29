@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_POSITION } from 'chess.js';
 import './panels';
 import { PgnImport } from './components/PgnImport';
+import { SetPosition } from './components/SetPosition';
+import { checkFen } from './state/position';
+import { TRAINER_EVENT } from './chessmind/usePuzzle';
 import { useEngine } from './engine/useEngine';
 import { useChessMind } from './chessmind/useChessMind';
 import { useChessMindTools } from './chessmind/useChessMindTools';
@@ -10,7 +13,7 @@ import type { Orientation } from './components/boardGeometry';
 import { useGame } from './state/useGame';
 import { useSimulate } from './simulate/useSimulate';
 import { eraseCounts, toPgn, type EraseScope } from './state/gameReducer';
-import { AppContext, type AppCtx, type ToastAction } from './app/AppContext';
+import { AppContext, GAME_RESET_EVENT, type AppCtx, type ToastAction } from './app/AppContext';
 import { BoardStage } from './app/BoardStage';
 import { TopBar } from './app/TopBar';
 import { CommandPalette } from './app/CommandPalette';
@@ -30,6 +33,7 @@ export default function App() {
   const { state, dispatch, chess, annotation, lastMove } = useGame();
   const [orientation, setOrientation] = useState<Orientation>('white');
   const [showImport, setShowImport] = useState(false);
+  const [showSetPosition, setShowSetPosition] = useState(false);
   const [overlay, setOverlay] = useState<'palette' | 'shortcuts' | null>(null);
   const [toastMsg, setToastMsg] = useState<{ text: string; action?: ToastAction; key: number } | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -119,6 +123,9 @@ export default function App() {
 
   const newGame = useCallback(() => {
     if (!hasMoves || confirmReset) {
+      // no answer keeps streaming into the new game's chat, and an open puzzle session closes (ChessMindPanel)
+      chessmind.detach();
+      window.dispatchEvent(new Event(GAME_RESET_EVENT));
       dispatch({ type: 'NEW_GAME' });
       setConfirmReset(false);
       clearTimeout(confirmTimer.current);
@@ -128,7 +135,29 @@ export default function App() {
       clearTimeout(confirmTimer.current);
       confirmTimer.current = setTimeout(() => setConfirmReset(false), 4000);
     }
-  }, [hasMoves, confirmReset, dispatch, toast]);
+  }, [hasMoves, confirmReset, dispatch, toast, chessmind]);
+
+  /**
+   * A new game from a set-up position (the Set position dialog, /fen): the game on the board goes into the saved
+   * games (not a Lichess trainer puzzle, as with the next puzzle), a running ChessMind answer is detached and the next
+   * question starts a fresh conversation, a puzzle session closes, a review or simulation stops. False if invalid.
+   */
+  const setPosition = useCallback(
+    (fen: string, orient?: Orientation): boolean => {
+      const check = checkFen(fen);
+      if (!check.ok) return false;
+      if (!(state.meta.event ?? '').startsWith(TRAINER_EVENT)) setSavedGames(pushHistory(state));
+      chessmind.newChat();
+      review.cancel();
+      if (sim.phase !== 'idle') sim.stop();
+      window.dispatchEvent(new Event(GAME_RESET_EVENT));
+      dispatch({ type: 'NEW_GAME', startFen: check.fen });
+      if (orient) setOrientation(orient);
+      toast(check.warning ? `New game from the set-up position. ${check.warning}` : 'New game from the set-up position');
+      return true;
+    },
+    [state, chessmind, review, sim, dispatch, toast],
+  );
 
   /** Swap a game from the history onto the board (the current game goes into the history). */
   const restoreGame = useCallback(
@@ -170,8 +199,9 @@ export default function App() {
 
   const ctx: AppCtx = {
     state, dispatch, chess, fen, annotation, lastMove, uciMoves, orientation, flip, playUci,
-    engine, chessmind, sim, review, savedGames, restoreGame, ui, updateUi, layout, revealPanel, toast, erase, exportPgn, newGame,
+    engine, chessmind, sim, review, savedGames, restoreGame, ui, updateUi, layout, revealPanel, toast, erase, exportPgn, newGame, setPosition,
     openImport: () => setShowImport(true),
+    openSetPosition: () => setShowSetPosition(true),
     openPalette: () => setOverlay('palette'),
     openShortcuts: () => setOverlay('shortcuts'),
   };
@@ -217,6 +247,16 @@ export default function App() {
       </div>
 
       {showImport && <PgnImport onImport={(pgn) => dispatch({ type: 'LOAD_PGN', pgn })} onClose={() => setShowImport(false)} />}
+      {showSetPosition && (
+        <SetPosition
+          currentFen={fen}
+          orientation={orientation}
+          pieceSet={ui.pieceSet}
+          boardTheme={ui.boardTheme}
+          onApply={(f, o) => setPosition(f, o)}
+          onClose={() => setShowSetPosition(false)}
+        />
+      )}
       {overlay === 'palette' && <CommandPalette commands={commands} onClose={() => setOverlay(null)} />}
       {overlay === 'shortcuts' && <ShortcutsSheet commands={commands} onClose={() => setOverlay(null)} />}
       <div className="toast-region" aria-live="polite">

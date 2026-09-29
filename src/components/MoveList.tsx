@@ -4,6 +4,7 @@ import type { GameState, MoveNode } from '../types';
 import { EmptyState } from '../ui/primitives';
 import { ROOT_ID } from '../types';
 import { isMainLine } from '../state/gameReducer';
+import { plyOffset } from '../state/position';
 import type { GameAction } from '../state/gameReducer';
 
 interface Props {
@@ -156,7 +157,7 @@ export function MoveList({ state, dispatch, onImport, tools }: Props & { onImpor
             Play a move on the board to start. Playing a different move from any earlier position creates a variation, shown indented here.
           </EmptyState>
         )}
-        {firstMove && <Line state={state} startId={firstMove} startPly={1} depth={0} activeRef={activeRef} onGoto={onGoto} />}
+        {firstMove && <Line state={state} startId={firstMove} startPly={1 + plyOffset(state.startFen)} depth={0} activeRef={activeRef} onGoto={onGoto} />}
         {state.meta.result && state.meta.result !== '*' && <div className="result">{state.meta.result}</div>}
       </div>
     </div>

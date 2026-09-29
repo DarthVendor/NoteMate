@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   ArrowDown, ArrowLeft, ChartLine, History as HistoryIcon, ArrowRight, ArrowUp, ChevronFirst, ChevronLast, ClipboardCopy, Cpu, Eraser, FilePlus2, FlipVertical2,
-  Keyboard, LayoutTemplate, Moon, MessageSquareText, Palette, PanelsTopLeft, RotateCcw, StickyNote, Sun, SunMoon, Swords, Upload, Wrench,
+  Keyboard, LayoutTemplate, Moon, MessageSquareText, Palette, PanelsTopLeft, RotateCcw, SquarePen, StickyNote, Sun, SunMoon, Swords, Upload, Wrench,
 } from 'lucide-react';
 import type { AppCtx } from './AppContext';
 import { allPanels } from '../workspace/registry';
@@ -46,6 +46,10 @@ export function buildCommands(ctx: AppCtx): Command[] {
     { id: 'game.eraseArrows', title: 'Erase arrows and highlights (all positions)', group: 'Game', icon: Eraser, keywords: 'clear shapes circles drawings everywhere pinned', run: () => ctx.erase('shapes') },
     { id: 'game.eraseAll', title: 'Erase side lines and arrows', group: 'Game', icon: Eraser, keywords: 'clear everything clean up variations shapes', run: () => ctx.erase('all') },
     { id: 'game.new', title: 'New game', group: 'Game', icon: FilePlus2, keywords: 'reset clear start over', run: ctx.newGame },
+    {
+      id: 'game.setPosition', title: 'Set position…', group: 'Game', icon: SquarePen,
+      keywords: 'fen setup set up position edit board editor custom start from current board puzzle', run: ctx.openSetPosition,
+    },
     {
       id: 'game.ask', title: 'Ask ChessMind…', group: 'Game', icon: MessageSquareText, shortcuts: [['/']], keywords: 'chat model question coach',
       run: () => {

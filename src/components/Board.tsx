@@ -22,7 +22,7 @@ interface Props {
 }
 
 const PIECE_URLS = import.meta.glob('../assets/pieces/*/*.svg', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
-const pieceUrl = (set: PieceSet, color: Color, type: PieceSymbol) => PIECE_URLS[`../assets/pieces/${set}/${color}${type.toUpperCase()}.svg`];
+export const pieceUrl = (set: PieceSet, color: Color, type: PieceSymbol) => PIECE_URLS[`../assets/pieces/${set}/${color}${type.toUpperCase()}.svg`];
 
 interface Placed {
   id: number;
@@ -97,8 +97,8 @@ function usePlacedPieces(chess: Chess, orientation: Orientation): { pieces: Plac
   return tracked;
 }
 
-const GLYPH: Record<PieceSymbol, string> = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
-const PIECE_NAME: Record<PieceSymbol, string> = { k: 'king', q: 'queen', r: 'rook', b: 'bishop', n: 'knight', p: 'pawn' };
+export const GLYPH: Record<PieceSymbol, string> = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
+export const PIECE_NAME: Record<PieceSymbol, string> = { k: 'king', q: 'queen', r: 'rook', b: 'bishop', n: 'knight', p: 'pawn' };
 
 function shapeColorFromEvent(e: React.PointerEvent | PointerEvent): ShapeColor {
   if (e.shiftKey) return 'red';

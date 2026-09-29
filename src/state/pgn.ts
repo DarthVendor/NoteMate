@@ -1,6 +1,7 @@
 import { Chess, DEFAULT_POSITION } from 'chess.js';
 import type { GameState, MoveNode } from '../types';
 import { ROOT_ID } from '../types';
+import { plyOffset } from './position';
 
 /* ---------- Parsing ---------- */
 
@@ -243,7 +244,7 @@ export function toPgn(state: GameState): string {
   const rootNotes = state.nodes[ROOT_ID].annotation?.notes.map((n) => escapeComment(n.text)).filter(Boolean) ?? [];
   const body = [
     rootNotes.length ? `{ ${rootNotes.join(' | ')} }` : '',
-    writeLine(state, state.nodes[ROOT_ID].children[0], 1, true, false),
+    writeLine(state, state.nodes[ROOT_ID].children[0], 1 + plyOffset(state.startFen), true, false),
     result ?? '*',
   ]
     .filter(Boolean)

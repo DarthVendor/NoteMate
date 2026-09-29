@@ -233,6 +233,56 @@
 .pgn-text { font-family: var(--font-mono); font-size: var(--fs-sm); min-height: 220px; }
 .pgn-text.drag-over { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
+/* Set position dialog (components/SetPosition.tsx): board editor, palette, side / castling / en passant, FEN field. */
+.setpos-modal { width: min(680px, 100%); }
+.setpos-quick { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.setpos-quick .spacer { flex: 1; }
+.setpos-body { display: flex; flex-wrap: wrap; gap: var(--sp-4); align-items: flex-start; }
+.setpos-editor { --bs: min(360px, calc(100vw - 72px)); display: flex; flex-direction: column; gap: 6px; width: var(--bs); }
+.board.setpos-board { width: var(--bs); height: var(--bs); flex-shrink: 0; cursor: pointer; }
+.setpos-board .square { display: grid; place-items: center; }
+.setpos-piece {
+  width: 100%; height: 100%;
+  display: grid; place-items: center;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  pointer-events: none;
+  position: relative;
+  z-index: 1;
+}
+.setpos-board.glyph-set .setpos-piece { font-size: calc(var(--bs) / 8 * 0.78); line-height: 1; }
+.setpos-board.glyph-set .setpos-piece.w { color: #fbfaf7; -webkit-text-stroke: 1px #2a2723; }
+.setpos-board.glyph-set .setpos-piece.b { color: #1d1b18; -webkit-text-stroke: 0.6px #000; }
+.setpos-palette-row { display: flex; gap: 4px; align-items: center; }
+.setpos-tool {
+  flex: 1;
+  aspect-ratio: 1;
+  max-width: calc(var(--bs) / 6);
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-sunken);
+  cursor: pointer;
+  transition: background var(--dur-fast), border-color var(--dur-fast);
+}
+.setpos-tool:hover { border-color: var(--border-strong); }
+.setpos-tool[aria-pressed='true'] { background: var(--accent-soft); border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.setpos-tool-piece { display: grid; place-items: center; width: 100%; height: 100%; background-size: 100% 100%; background-repeat: no-repeat; }
+.setpos-tool.glyph .setpos-tool-piece { font-size: 26px; line-height: 1; }
+.setpos-tool.glyph.w .setpos-tool-piece { color: #fbfaf7; -webkit-text-stroke: 1px #2a2723; }
+.setpos-tool.glyph.b .setpos-tool-piece { color: #1d1b18; }
+.setpos-eraser[aria-pressed='true'] { --btn-bg: var(--accent-soft); --btn-fg: var(--accent); --btn-border: var(--accent); }
+.setpos-tip { font-size: var(--fs-xs); margin-left: 4px; }
+.setpos-side { flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: var(--sp-3); }
+.setpos-side .check-row.is-disabled { color: var(--text-3); cursor: not-allowed; }
+.setpos-fen { font-family: var(--font-mono); font-size: var(--fs-xs); }
+.setpos-warning { color: var(--warning); }
+@media (max-width: 760px) {
+  .setpos-modal { padding: var(--sp-4); }
+  .setpos-editor { --bs: min(360px, calc(100vw - 64px)); }
+  .setpos-side { min-width: 0; width: 100%; }
+}
+
 .palette-backdrop { place-items: start center; padding-top: 12vh; }
 .palette {
   width: min(620px, 100%);
