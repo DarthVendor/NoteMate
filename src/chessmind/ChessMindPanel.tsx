@@ -24,6 +24,10 @@ import { ProgressBar, Segmented } from '../ui/primitives';
 import { AppContext } from '../app/AppContext';
 import { MIN_ENGINE_DEPTH, chatContext, contextLabel, engineInfoFor, messageMarks, userSide, type MessageMarks } from './chatContext';
 import { MarkedText } from './MarkedText';
+import { Target as PuzzleIcon } from 'lucide-react';
+import { GoalCheck, PuzzlePanel } from './PuzzlePanel';
+import { usePuzzle } from './usePuzzle';
+import { goalLabel, parseGoal } from './puzzle';
 
 type ChessMindState = ReturnType<typeof useChessMind>;
 
@@ -68,6 +72,8 @@ const SLASH: { insert: string; desc: string; run?: boolean }[] = [
   { insert: 'clear arrows', desc: 'Clear arrows and highlights', run: true },
   { insert: 'play Nf3', desc: 'Play a move (SAN or UCI)' },
   { insert: 'analyse', desc: 'Top model moves with a short explanation', run: true },
+  { insert: 'puzzle', desc: 'Puzzle mode: solve this position (or the Lichess trainer)', run: true },
+  { insert: 'puzzle mate 2', desc: 'Puzzle with a goal: mate N, win queen, piece, material, win, draw, best' },
   { insert: 'new game', desc: 'Start over (clears the chat)', run: true },
 ];
 
@@ -85,6 +91,8 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
   // The analysis engine (when the panel is inside the app): its result goes with questions about its position.
   const app = useContext(AppContext);
   const engine = app?.engine;
+  // Puzzle mode (usePuzzle.ts / PuzzlePanel.tsx): the panel above the transcript, /puzzle and the header chip
+  const puzzle = usePuzzle({ cm, state, dispatch, engine, orientation: app?.orientation, flip: onFlip });
   // Claim checker marks per finished answer (cached per message object: patches replace only the patched message).
   const marks = useMemo(() => {
     const out = new Map<string, MessageMarks>();
@@ -241,6 +249,12 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
     if (!text) return;
     setPrompt('');
     setSlashSel(0);
+    const pz = (slashed || /^puzzle$/i.test(text)) && /^puzzle\b/i.test(text) ? parseGoal(text.slice(6)) : false;
+    if (pz !== false) {
+      if (pz === undefined) return echo(text, 'Puzzle goals: mate N, win queen, piece, material, win, draw, best.');
+      puzzle.openHere(pz);
+      return echo(text, `Puzzle mode on this position${pz ? ` (${goalLabel(pz)})` : ''}.`);
+    }
     const cmd = parseCommand(text, state, chess);
     if (cmd) {
       setPlaying(null);
@@ -264,6 +278,9 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
     if (slashed) return echo(text, 'Not a board command. Type / to see the commands.');
     if (status !== 'ready') return echo(text, 'That is not a board command, and the model is not loaded yet.');
     if (!info?.hasText) return echo(text, 'This model has no text vocabulary.');
+    // A goal statement ("White has checkmate in 2"): the puzzle layout (the user's words as the goal, the position,
+    // think on, no engine / candidates block) and the answer checked (usePuzzle.ts askGoal)
+    if (settings.goalPuzzles !== false && puzzle.askGoal(text)) return;
     const fenOpt = settings.aboutPosition ? fen : undefined;
     const context = !fenOpt && settings.sendMoves && uciMoves && uciMoves.length ? uciMoves : undefined;
     // With a snapshot, the moves are not in the prompt but an answer may still rewind to a position along them
@@ -482,6 +499,7 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
       rows.push(
         <div key={m.id} className="chat-msg chat-user">
           <div className="chat-bubble">{text}</div>
+          {puzzle.chatGoals[m.id] && <span className="pz-msg-badge" title="Asked in the puzzle layout (think on); the answer is checked">puzzle</span>}
           {(m.fen || m.context?.length || m.contextText) && (
             <div className="chat-meta">
               {m.fen ? 'about this position' : m.context?.length ? `with the game so far · ${m.context.length} plies` : ''}
@@ -500,6 +518,7 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
       rows.push(
         <div key={m.id} className={`chat-msg chat-bot ${m.done ? '' : 'is-streaming'}`}>
           <div className="chat-bubble">{renderAnswer(m)}</div>
+          {puzzle.chatGoals[m.id] && <GoalCheck check={puzzle.chatGoals[m.id]} state={state} dispatch={dispatch} onRetry={() => puzzle.retryGoal(m.id)} canRetry={status === 'ready' && !chatBusy} />}
           {(m.stopped || (isLast && m.msPerToken)) && (
             <div className="chat-meta" data-testid={isLast ? 'chessmind-latency' : undefined}>
               {m.stopped && 'stopped'}
@@ -527,6 +546,9 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
           {statusText}
         </span>
         <span className="chat-head-tools">
+          <button className="pz-chip" aria-pressed={puzzle.open} onClick={() => (puzzle.open ? puzzle.exit() : puzzle.openHere())} title="Puzzle mode: solve this position, or train on Lichess puzzles" data-testid="puzzle-chip">
+            <PuzzleIcon size={11} strokeWidth={2} /> Puzzle
+          </button>
           {chat.length > 0 && (
             <button
               className="btn btn-ghost btn-icon btn-sm"
@@ -557,6 +579,15 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
         </p>
       )}
 
+      {puzzle.open && (
+        <PuzzlePanel
+          puzzle={puzzle}
+          state={state}
+          dispatch={dispatch}
+          canAsk={status === 'ready' && !!info?.hasText && !chatBusy}
+          askTitle={status !== 'ready' ? 'Load the ChessMind model first' : !info?.hasText ? 'This model has no text vocabulary' : 'ChessMind is busy'}
+        />
+      )}
       {!settings.enabled ? (
         <div className="chat-intro">
           <span className="chat-intro-icon">

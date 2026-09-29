@@ -169,6 +169,13 @@ export function ChessMindSettings({ cm }: { cm: ChessMindState }) {
             </span>
             <input type="checkbox" checked={settings.checkClaims} onChange={(e) => update({ checkClaims: e.target.checked })} data-testid="chessmind-check-claims" />
           </label>
+          <label className="check-row">
+            <span className="check-text">
+              <span>Treat goal statements as puzzles</span>
+              <span className="field-hint">“White has mate in 2”, “Black to play and win”: asked in the puzzle layout (think on, no engine block) and the answer checked with Stockfish.</span>
+            </span>
+            <input type="checkbox" checked={settings.goalPuzzles !== false} onChange={(e) => update({ goalPuzzles: e.target.checked })} data-testid="chessmind-goal-puzzles" />
+          </label>
           <MenuDivider />
           <MenuLabel>Predictions</MenuLabel>
           <label className="check-row">

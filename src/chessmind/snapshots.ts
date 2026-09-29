@@ -53,15 +53,19 @@ export function dialoguePosition(turns: DialogueTurn[]): { start?: string; posit
  * Port of generate.anchor_user_lines: a user turn's move line without a snapshot of its own is the game from the
  * initial position, but lines start from the dialogue's latest snapshot -- which an earlier answer may have moved (a
  * rewind or "the position after ..." board). Like the training encoder (a line whose start differs from the current
- * snapshot gets one), put the initial position's snapshot before such a line.
+ * snapshot gets one), put the initial position's snapshot before such a line. A line after a snapshot of the SAME
+ * user turn starts there (the puzzle layout: goal, snapshot, the opponent's last move).
  */
 export function anchorUserLines(turns: DialogueTurn[]): DialogueTurn[] {
   let start: string | undefined;
   return turns.map((turn) => {
     const parts: DialogueTurn['parts'] = [];
+    let own = false;
     for (const part of turn.parts) {
-      if (part.kind === 'fen') start = part.fen;
-      else if (part.kind === 'line' && turn.role === 'user' && start !== undefined && snapshotKey(start) !== snapshotKey(START_FEN)) {
+      if (part.kind === 'fen') {
+        start = part.fen;
+        own = true;
+      } else if (part.kind === 'line' && turn.role === 'user' && !own && start !== undefined && snapshotKey(start) !== snapshotKey(START_FEN)) {
         parts.push({ kind: 'fen', fen: START_FEN });
         start = START_FEN;
       }

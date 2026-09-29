@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import ChessMindWorker from './worker.ts?worker&inline';
 import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type PickThink, type ThinkMode, type ToWorker } from './protocol';
 import { historyParts, type DialogueTurn } from './tokenizer';
+import type { DialoguePart } from './tokenizer';
 import type { ChatMessage } from '../types';
 import { DEFAULT_LINE_RULES } from './lineRules';
 import type { GameAction } from '../state/gameReducer';
@@ -61,6 +62,9 @@ export interface ChessMindSettings {
   /** Think-then-move picks open the think with the perspective anchor "I'm playing White, and it's my move."
    * (teacher-forced, as every training think opens; thinkMove.ts anchorIds). */
   thinkAnchor: boolean;
+  /** A goal stated in the chat ("White has checkmate in 2") is asked in the puzzle layout and the answer checked
+   * (usePuzzle.ts askGoal); unset = on. */
+  goalPuzzles?: boolean;
 }
 
 export interface PickResult {
@@ -144,6 +148,8 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
   const chatMsg = useRef<string | null>(null);
   /** Outstanding pick() requests (the simulator), by worker request id. */
   const picks = useRef(new Map<number, { resolve: (r: PickResult) => void; reject: (e: Error) => void; onThink?: (t: PickThink) => void }>());
+  /** askParts() callers waiting for their answer (puzzle mode), by worker request id; null = failed / unloaded. */
+  const partsWait = useRef(new Map<number, (r: { parts: DialoguePart[]; stopped?: boolean } | null) => void>());
   const runToolRef = useRef(runTool);
   useEffect(() => {
     runToolRef.current = runTool;
@@ -220,6 +226,8 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
             patch: { parts: m.parts, tokens: m.tokens, msPerToken: m.msPerToken, prefillMs: m.prefillMs, done: m.done, stopped: m.stopped, ...(m.predictions ? { predictions: m.predictions } : {}) },
           });
           if (m.done) {
+            partsWait.current.get(m.id)?.({ parts: m.parts, stopped: m.stopped });
+            partsWait.current.delete(m.id);
             setChatBusy(false);
             chatId.current = null;
             chatMsg.current = null;
@@ -256,6 +264,8 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
             break;
           }
           if (m.id !== undefined && m.id === chatId.current) {
+            partsWait.current.get(m.id)?.(null);
+            partsWait.current.delete(m.id);
             if (chatMsg.current) dispatch({ type: 'CHAT_PATCH', id: chatMsg.current, patch: { done: true, stopped: true } });
             setChatBusy(false);
             chatId.current = null;
@@ -286,6 +296,8 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
       for (const p of pending.values()) p.reject(new Error('ChessMind model unloaded'));
       pending.clear();
       if (chatMsg.current) dispatch({ type: 'CHAT_PATCH', id: chatMsg.current, patch: { done: true, stopped: true } });
+      for (const w of partsWait.current.values()) w(null);
+      partsWait.current.clear();
       chatId.current = null;
       chatMsg.current = null;
     };
@@ -376,6 +388,33 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
     [chat, status, dispatch, info?.manifest.think_chain, settings.think, settings.temperature, settings.lineEndAnswer, settings.lineEndThink, settings.maxLinePliesAnswer, settings.maxLinePliesThink, settings.tools],
   );
 
+  /** Puzzle mode (usePuzzle.ts): ask with the question's exact parts and an explicit history (the training layout,
+   * sent verbatim), streaming into the chat as a user message (`label`) + answer like ask(); resolves with the final
+   * answer parts (null: busy, not loaded, failed). */
+  const askParts = useCallback(
+    (o: { parts: DialoguePart[]; history: DialogueTurn[]; label: string; originId: string; fen?: string; think?: ThinkMode; maxTokens?: number; maxThinkTokens?: number; temperature?: number; userId?: string; answerId?: string }): Promise<{ parts: DialoguePart[]; stopped?: boolean } | null> => {
+      const worker = workerRef.current;
+      if (!worker || status !== 'ready' || chatId.current !== null) return Promise.resolve(null);
+      const id = ++reqId.current;
+      const answerId = o.answerId ?? newId();
+      chatId.current = id;
+      chatMsg.current = answerId;
+      setChatBusy(true);
+      setError(null);
+      dispatch({
+        type: 'CHAT_APPEND',
+        messages: [
+          { id: o.userId ?? newId(), role: 'user', kind: 'model', parts: [{ kind: 'text', text: o.label }], originId: o.originId, fen: o.fen },
+          { id: answerId, role: 'assistant', kind: 'model', parts: [], originId: o.originId, fen: o.fen },
+        ],
+      });
+      const done = new Promise<{ parts: DialoguePart[]; stopped?: boolean } | null>((resolve) => partsWait.current.set(id, resolve));
+      worker.postMessage({ type: 'chat', id, history: o.history, prompt: o.label, parts: o.parts, maxTokens: o.maxTokens ?? CHAT_MAX_TOKENS, temperature: o.temperature ?? settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: o.think ?? settings.think, maxThinkTokens: o.maxThinkTokens ?? CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } } } satisfies ToWorker);
+      return done;
+    },
+    [status, dispatch, settings.think, settings.temperature, settings.lineEndAnswer, settings.lineEndThink, settings.maxLinePliesAnswer, settings.maxLinePliesThink],
+  );
+
   /** Top moves for the position after `movesUci` plus a short explanation from the model. */
   const analyse = useCallback(
     (prompt: string, movesUci: string[], originId: string) => {
@@ -406,6 +445,8 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
   /** Forget the running generation (e.g. when the game, and with it the chat, is reset). */
   const detach = useCallback(() => {
     stop();
+    for (const w of partsWait.current.values()) w(null);
+    partsWait.current.clear();
     chatId.current = null;
     chatMsg.current = null;
     setChatBusy(false);
@@ -413,5 +454,5 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
 
   const currentPrediction = prediction && prediction.key === `${movesKey}|${contextPlies}` ? prediction : null;
 
-  return { pick, stopPicks, setSuspended, contextPlies, settings, update, models, modelsError, modelId, status, error, progress, info, prediction: currentPrediction, chatBusy, canGenerate: status === 'ready' && !chatBusy, ask, analyse, stop, detach };
+  return { pick, stopPicks, setSuspended, contextPlies, settings, update, models, modelsError, modelId, status, error, progress, info, prediction: currentPrediction, chatBusy, canGenerate: status === 'ready' && !chatBusy, ask, askParts, analyse, stop, detach };
 }

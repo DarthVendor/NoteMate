@@ -25,6 +25,7 @@ import { EngineClient } from '../engine/EngineClient';
 import { DEFAULT_ENGINE_SETTINGS, resolveEngineSource } from '../engine/engines';
 import type { ChessMindModel } from './useChessMind';
 import type { ContextEngineInfo } from './promptContext';
+import { devPuzzle, type DevPuzzleOptions } from './puzzleDev';
 
 /** Moves as a list or a string: UCI or SAN, move numbers ("1.", "12...") ignored. */
 type MovesInput = string | string[];
@@ -48,6 +49,9 @@ export interface DevAskOptions {
   moves?: MovesInput;
   /** With `moves` and no `fen`: ask about the position after them as a snapshot (the panel's "about position"). */
   aboutPosition?: boolean;
+  /** The question's parts exactly (e.g. the puzzle training layout: goal text, snapshot, last move, position note);
+   * replaces prompt / fen / moves / contextText as the user turn (`prompt` is kept only as the label). */
+  parts?: ChatPart[];
   history?: DevTurn[];
   /** Earlier answers keep their think in the history (default: the model's manifest think_chain, as the panel). */
   keepThinks?: boolean;
@@ -398,6 +402,7 @@ class DevChessMind {
         context,
         gameMoves,
         contextText: contextText || undefined,
+        parts: o.parts,
         maxTokens: o.maxTokens ?? 60,
         temperature: o.temperature ?? 0.8,
         topK: o.topK ?? 50,
@@ -415,7 +420,7 @@ class DevChessMind {
     const final = last as Extract<FromWorker, { type: 'chat-update' }> | null;
     const tr = trace as ChatTrace | null;
     const parts = final?.parts ?? [];
-    return this.describe({ model, text, fen, context, contextText: contextText || undefined, history, parts, trace: tr, final, seed: o.seed, ms: performance.now() - t0, error, inHistory: o.history ?? [] });
+    return this.describe({ model, text, fen, context, contextText: contextText || undefined, userParts: o.parts, history, parts, trace: tr, final, seed: o.seed, ms: performance.now() - t0, error, inHistory: o.history ?? [] });
   }
 
   private describe(a: {
@@ -424,6 +429,7 @@ class DevChessMind {
     fen?: string;
     context?: string[];
     contextText?: string;
+    userParts?: ChatPart[];
     history: DialogueTurn[];
     parts: ChatPart[];
     trace: ChatTrace | null;
@@ -433,7 +439,7 @@ class DevChessMind {
     error?: string;
     inHistory: DevTurn[];
   }): DevAnswer {
-    const userParts: ChatPart[] = [...(a.fen ? [{ kind: 'fen', fen: a.fen } as ChatPart] : []), { kind: 'text', text: a.text }, ...(a.context ? [{ kind: 'line', moves: a.context } as ChatPart] : [])];
+    const userParts: ChatPart[] = a.userParts?.length ? a.userParts : [...(a.fen ? [{ kind: 'fen', fen: a.fen } as ChatPart] : []), { kind: 'text', text: a.text }, ...(a.context ? [{ kind: 'line', moves: a.context } as ChatPart] : [])];
     let start: string | undefined;
     try {
       start = dialoguePosition([...a.history, { role: 'user', parts: userParts }]).start;
@@ -489,7 +495,7 @@ class DevChessMind {
     } catch {
       /* claim checker failure: no flags */
     }
-    const userTurn: DevTurn = { role: 'user', text: a.text, ...(a.fen ? { fen: a.fen } : {}) };
+    const userTurn: DevTurn = a.userParts?.length ? { role: 'user', text: a.text, parts: a.userParts } : { role: 'user', text: a.text, ...(a.fen ? { fen: a.fen } : {}) };
     const f = a.final;
     return {
       model: a.model,
@@ -549,6 +555,8 @@ export function installDevHook() {
     ask: (o: DevAskOptions) => dev.ask(o),
     predict: (o: { fen?: string; moves?: MovesInput; top?: number; contextPlies?: number | null; model?: string }) => dev.predict(o),
     thinkGame: (o: Parameters<DevChessMind['thinkGame']>[0]) => dev.thinkGame(o),
+    /** One Ask-ChessMind puzzle flow (puzzleDev.ts): tries with verification and refutations. */
+    puzzle: (o: DevPuzzleOptions) => devPuzzle(o, (a) => dev.ask(a)),
   };
   (window as unknown as { __chessmind: typeof api }).__chessmind = api;
   document.documentElement.dataset.chessmindDev = 'ready';
