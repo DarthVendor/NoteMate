@@ -1,3 +1,4 @@
+import type { ChatTask } from './tasks';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ChessMindWorker from './worker.ts?worker&inline';
 import { DEFAULT_CHAT_MAX_TOKENS, DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type PickThink, type ThinkMode, type ToWorker } from './protocol';
@@ -363,7 +364,7 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
 
   /** Send a question to the model; the answer streams into a new assistant message. */
   const ask = useCallback(
-    (prompt: string, opts: { originId: string; fen?: string; context?: string[]; gameMoves?: string[]; contextText?: string }) => {
+    (prompt: string, opts: { originId: string; fen?: string; context?: string[]; gameMoves?: string[]; contextText?: string; task?: ChatTask | null }) => {
       const worker = workerRef.current;
       const text = prompt.trim();
       if (!worker || status !== 'ready' || chatId.current !== null || !text) return;
@@ -390,7 +391,7 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
         ],
       });
       const tools = settings.tools !== 'off' ? { names: OFFERED_TOOLS, takesLine: Object.fromEntries(OFFERED_TOOLS.map((n) => [n, TOOL_SPECS[n].takesLine])), force: settings.tools === 'force' ? 'engine' : null } : undefined;
-      worker.postMessage({ type: 'chat', id, ...takeFresh(), history, prompt: text, fen: opts.fen, context: opts.context, gameMoves: opts.gameMoves, contextText: opts.contextText || undefined, maxTokens: CHAT_MAX_TOKENS, temperature: settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: settings.think, maxThinkTokens: CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } }, tools, repetition: { penalty: settings.repetitionPenalty, stopLoops: settings.stopLoops } } satisfies ToWorker);
+      worker.postMessage({ type: 'chat', id, ...takeFresh(), ...(opts.task !== undefined ? { task: opts.task } : {}), history, prompt: text, fen: opts.fen, context: opts.context, gameMoves: opts.gameMoves, contextText: opts.contextText || undefined, maxTokens: CHAT_MAX_TOKENS, temperature: settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: settings.think, maxThinkTokens: CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } }, tools, repetition: { penalty: settings.repetitionPenalty, stopLoops: settings.stopLoops } } satisfies ToWorker);
     },
     [chat, status, dispatch, info?.manifest.think_chain, settings.think, settings.temperature, settings.lineEndAnswer, settings.lineEndThink, settings.maxLinePliesAnswer, settings.maxLinePliesThink, settings.tools, settings.repetitionPenalty, settings.stopLoops],
   );

@@ -60,13 +60,15 @@ import { encodeLineTokens } from './lines.ts';
 /** Names of the format-4 extras in slot order (tokenizer.EXTRA_SPECIAL_TOKENS); slots 1-6 replace `<|reserved_k|>`. */
 /** Prompt roles (extras 11-17, ids 18,459-18,465 with the v4 BPE): tokenizer.ROLE_TOKENS in Python. */
 export const ROLE_TOKENS = ['<|system|>', '<|context|>', '<|end_context|>', '<|goal|>', '<|end_goal|>', '<|plan|>', '<|end_plan|>'];
-export const EXTRA_SPECIAL_TOKENS = ['<|end_think|>', '<|branch|>', '<|end_branch|>', '<|repetition|>', '<|draw|>', '<|mate|>', '<|check|>', '<|reserved_7|>', '<|tool|>', '<|tool_result|>', '<|end_tool|>', ...ROLE_TOKENS];
+/** Task markers (extras 18-19, ids 18,466-18,467): tokenizer.TASK_TOKENS in Python (tasks.ts). */
+export const TASK_TOKENS = ['<|evaluate|>', '<|explain|>'];
+export const EXTRA_SPECIAL_TOKENS = ['<|end_think|>', '<|branch|>', '<|end_branch|>', '<|repetition|>', '<|draw|>', '<|mate|>', '<|check|>', '<|reserved_7|>', '<|tool|>', '<|tool_result|>', '<|end_tool|>', ...ROLE_TOKENS, ...TASK_TOKENS];
 /** Extras of a format-4 tokenizer before the tool tokens (tokenizer.BASE_EXTRA_COUNT). */
 export const BASE_EXTRA_COUNT = 8;
 
 /** Prompt-only parts (prompt roles, the app writes them; never decoded from the model): `<|context|> text
  * <|end_context|>` (user turns) and `<|goal|> text <|end_goal|>` (system / user turns). */
-export type PromptPart = { kind: 'context'; text: string } | { kind: 'goal'; text: string };
+export type PromptPart = { kind: 'context'; text: string } | { kind: 'goal'; text: string } | { kind: 'task'; task: 'evaluate' | 'explain' };
 /** One part of dialogue content: plain text, a line of UCI moves, a board snapshot (FEN) or (format 4) a think. */
 export type DialoguePart = ChatPart;
 export interface DialogueTurn {
@@ -297,9 +299,21 @@ export class ChessTokenizer {
   get supportsRoles(): boolean {
     return ROLE_TOKENS.every((t) => this.extraId(t) !== null);
   }
-  /** Role tokens only the app writes (system, context, goal): never allowed in generation. */
+  /** Role tokens only the app writes (system, context, goal, the task markers): never allowed in generation. */
   get promptOnlyIds(): number[] {
-    return [this.systemId, this.contextId, this.endContextId, this.goalId, this.endGoalId].filter((i): i is number => i !== null);
+    return [this.systemId, this.contextId, this.endContextId, this.goalId, this.endGoalId, ...Object.values(this.taskIds)].filter((i): i is number => i !== null);
+  }
+  /** Task markers (`{ evaluate, explain }`, tokenizer.task_ids in Python); empty without them. */
+  get taskIds(): Partial<Record<'evaluate' | 'explain', number>> {
+    const out: Partial<Record<'evaluate' | 'explain', number>> = {};
+    for (const token of TASK_TOKENS) {
+      const id = this.extraId(token);
+      if (id !== null) out[token.slice(2, -2) as 'evaluate' | 'explain'] = id;
+    }
+    return out;
+  }
+  get supportsTasks(): boolean {
+    return Object.keys(this.taskIds).length === TASK_TOKENS.length;
   }
   /** What the runtime appends after `<|tool_result|>`: the result text and `<|end_tool|>`. */
   encodeToolResult(text: string): number[] {
@@ -468,6 +482,14 @@ export class ChessTokenizer {
       if (turn.role === 'system' && turn.parts.some((p) => p.kind !== 'text' && p.kind !== 'goal')) throw new Error('a system turn holds text and goal parts only');
       turn.parts.forEach((part, i) => {
         if (part.kind === 'tool' && turn.role !== 'assistant') throw new Error('tool calls belong to assistant turns');
+        if (part.kind === 'task') {
+          // the request type (tasks.ts): the first token of a user turn, input only
+          if (turn.role !== 'user' || i !== 0) throw new Error('a task marker is the first part of a user turn');
+          const id = this.taskIds[part.task];
+          if (id === undefined) throw new Error(`no task marker ${part.task} in this tokenizer`);
+          ids.push(id);
+          return;
+        }
         if (part.kind === 'context' || part.kind === 'goal') {
           if (part.kind === 'context' && turn.role !== 'user') throw new Error('a context part belongs to a user turn');
           if (part.kind === 'goal' && turn.role === 'assistant') throw new Error('a goal part belongs to a system or user turn');
@@ -492,7 +514,7 @@ export class ChessTokenizer {
   }
 
   /** `<|context|> text <|end_context|>` / `<|goal|> text <|end_goal|>`. */
-  private encodeSegment(part: PromptPart, ids: number[]): void {
+  private encodeSegment(part: Extract<PromptPart, { kind: 'context' | 'goal' }>, ids: number[]): void {
     if (!this.supportsRoles) throw new Error(`this tokenizer has no <|${part.kind}|> (the prompt-role tokens)`);
     const text = part.text.trim();
     if (!text) throw new Error(`an empty ${part.kind} part`);

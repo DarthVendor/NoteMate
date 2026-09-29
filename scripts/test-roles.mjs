@@ -47,7 +47,7 @@ const clean = (x) => JSON.parse(JSON.stringify(x));
 check('the v4 fixture lists 8 extras', tv.chess_vocab.extra_special.length === 8);
 const t = new ChessTokenizer(tv.chess_vocab, tv.bpe);
 check('role tokens appended on load', t.supportsRoles && same(Object.fromEntries(ROLE_TOKENS.map((n) => [n, t.id(n)])), fx.tokenIds), trunc(fx.tokenIds));
-check('prompt-only ids', same([...t.promptOnlyIds].sort(), [t.systemId, t.contextId, t.endContextId, t.goalId, t.endGoalId].sort()));
+check('prompt-only ids', same([...t.promptOnlyIds].sort(), [t.systemId, t.contextId, t.endContextId, t.goalId, t.endGoalId, ...Object.values(t.taskIds)].sort()));
 
 // ---------------------------------------------------------------- dialogues
 for (const d of fx.dialogues) {

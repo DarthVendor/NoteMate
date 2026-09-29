@@ -133,5 +133,5 @@ export function carryPlans<T extends PromptTurn>(history: T[], keepLast = 1): T[
 
 /** Context / goal parts are prompt-only: the leaf parts a decoded answer can hold never include them. */
 export function isPromptPart(p: ChatPart | PromptPart | ChatLeafPart): p is PromptPart {
-  return p.kind === 'context' || p.kind === 'goal';
+  return p.kind === 'context' || p.kind === 'goal' || p.kind === 'task';
 }

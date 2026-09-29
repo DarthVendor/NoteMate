@@ -3,6 +3,7 @@
  * reasoning as a collapsed ThinkingBlock, suggestions for an empty chat, and a composer with a "/" command menu.
  * Model settings live in a popover (ChessMindSettings); move predictions are PredictionChips (shown by the host).
  */
+import type { ChatTask } from './tasks';
 import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Chess } from 'chess.js';
 import { ArrowUp, ArrowUpToLine, Bot, Eraser, Pause, Play, Square as StopIcon, X } from 'lucide-react';
@@ -72,6 +73,8 @@ const SLASH: { insert: string; desc: string; run?: boolean }[] = [
   { insert: 'clear arrows', desc: 'Clear arrows and highlights', run: true },
   { insert: 'play Nf3', desc: 'Play a move (SAN or UCI)' },
   { insert: 'analyse', desc: 'Top model moves with a short explanation', run: true },
+  { insert: 'evaluate', desc: 'Ask ChessMind to evaluate this position (who is better, and why)', run: true },
+  { insert: 'explain ', desc: 'Ask ChessMind to explain a move, line or this position (the ideas)' },
   { insert: 'puzzle', desc: 'Puzzle mode: solve this position (or the Lichess trainer)', run: true },
   { insert: 'puzzle mate 2', desc: 'Puzzle with a goal: mate N, win queen, piece, material, win, draw, best' },
   { insert: 'new game', desc: 'Start over (clears the chat)', run: true },
@@ -269,13 +272,24 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
       }
       return;
     }
-    if (isAnalysisRequest(text)) {
+    // Task markers (tasks.ts; models with manifest task_markers): /evaluate [question] and /explain [question] ask the
+    // chat with that request type; typed "evaluate" / "assess" goes to the chat as an evaluate request on such models
+    // (other models: the analysis action, and the slash commands ask without a marker)
+    const taskCmd = slashed ? /^(evaluate|explain)\b\s*(.*)$/i.exec(text) : null;
+    const taskModel = (info?.manifest.task_markers ?? 0) >= 1;
+    let question = text;
+    let task: ChatTask | undefined;
+    if (taskCmd) {
+      task = taskCmd[1].toLowerCase() as ChatTask;
+      question = taskCmd[2].trim() || (task === 'evaluate' ? 'Evaluate this position.' : 'Explain this position.');
+    } else if (taskModel && /^(evaluate|assess)\b/i.test(text) && isAnalysisRequest(text)) task = 'evaluate';
+    if (!task && isAnalysisRequest(text)) {
       if (!uciMoves) return echo(text, 'ChessMind follows games from the initial position; this game starts from a custom FEN.');
       if (status !== 'ready') return echo(text, 'The model is not loaded yet.');
       cm.analyse(text, uciMoves, state.currentId);
       return;
     }
-    if (slashed) return echo(text, 'Not a board command. Type / to see the commands.');
+    if (slashed && !task) return echo(text, 'Not a board command. Type / to see the commands.');
     if (status !== 'ready') return echo(text, 'That is not a board command, and the model is not loaded yet.');
     if (!info?.hasText) return echo(text, 'This model has no text vocabulary.');
     // A goal statement ("White has checkmate in 2"): the puzzle layout (the user's words as the goal, the position,
@@ -305,7 +319,7 @@ export function ChessMindPanel({ cm, state, dispatch, chess, fen, uciMoves, onFl
           you: info?.manifest.user_side ? userSide(settings.userSide ?? 'auto', { orientation: app?.orientation ?? 'white', simModelColor: app && app.sim.phase !== 'idle' ? (app.sim.live?.modelColor ?? null) : null }) : null,
         })
       : '';
-    cm.ask(text, { originId: state.currentId, fen: fenOpt, context, gameMoves, contextText });
+    cm.ask(question, { originId: state.currentId, fen: fenOpt, context, gameMoves, contextText, ...(task ? { task } : {}) });
   };
 
   // "/" menu entries matching what follows the slash.

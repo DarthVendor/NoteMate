@@ -20,6 +20,7 @@ import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_PRIOR_THINKS, DEFAULT_MAX_THINK_T
 import { ThinkMoveConstraint, anchorIds } from './thinkMove';
 import { fitHistory, thinkPrefixIds } from './thinkThread';
 import { PROMPT_ROLES_VERSION, promptTurns } from './roles';
+import { TASK_MARKERS_VERSION, taskOfQuestion, withTask } from './tasks';
 import { DEFAULT_REPETITION, RepetitionGuard } from './repetition';
 
 // Minimal typing of the onnxruntime-web globals used here.
@@ -738,7 +739,11 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
   // <|eos|> <|user|> ... <|assistant|>: the context every training dialogue has (the packer's separator first)
   // (role models: <|eos|> <|system|> ... <|user|> ... <|context|> ... <|end_context|> <|assistant|>; the positions,
   // snapshots and rows below read the same fen / line parts, which the role layout leaves where they are)
-  const prefix = t.chatPrompt(roles ? promptTurns(turns, req.parts?.length ? null : req.contextText, { mode: req.mode ?? null, tools: tools?.names ?? null, goal: req.goal ?? null }) : turns);
+  // Task markers (manifest task_markers, tasks.ts): <|evaluate|> / <|explain|> first in the question's turn -- the
+  // request's own task, else the one its wording asks for
+  const tasks = (manifest!.task_markers ?? 0) >= 1 && (manifest!.task_markers ?? 0) <= TASK_MARKERS_VERSION && t.supportsTasks;
+  const task = tasks ? (req.task !== undefined ? req.task : taskOfQuestion(req.prompt)) : null;
+  const prefix = t.chatPrompt(withTask(roles ? promptTurns(turns, req.parts?.length ? null : req.contextText, { mode: req.mode ?? null, tools: tools?.names ?? null, goal: req.goal ?? null }) : turns, task));
   const { start } = dialoguePosition(turns);
   // Snapshots may rewind: the initial position and the positions along the game (the moves when only a FEN is sent)
   const positions = rewindCandidates(turns, req.gameMoves);

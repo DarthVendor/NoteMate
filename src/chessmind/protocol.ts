@@ -2,6 +2,7 @@ import type { DialoguePart, DialogueTurn } from './tokenizer';
 import type { LineRules } from './lineRules';
 import type { ChatLeafPart } from '../types';
 import type { ChatMode } from './roles';
+import type { ChatTask } from './tasks';
 import type { LoopEvent, RepetitionRules } from './repetition';
 
 /** Default think budget: tokens of hidden reasoning before <|end_think|> is forced (as chat() in generate.py).
@@ -68,6 +69,9 @@ export interface ModelManifest {
    * prompts get a system turn, the app's blocks in a <|context|> segment and the think may close with a <|plan|>.
    * Absent / 0: the plain ctx1 layout. */
   prompt_roles?: number;
+  /** Task-marker version (ChessMind chessmind/model/tasks.py; tasks.ts): >= 1 = a chat question may open with
+   * <|evaluate|> / <|explain|>. Absent / 0: never sent. */
+  task_markers?: number;
 }
 
 /** Think budget of a think-then-move pick (think_move.DEFAULT_THINK_TOKENS in ChessMind). */
@@ -149,6 +153,9 @@ export type ToWorker =
       /** Prompt-role models (manifest `prompt_roles`): the app mode and a goal for the system turn (roles.ts). */
       mode?: ChatMode;
       goal?: string;
+      /** Task-marker models (manifest `task_markers`): the request type; undefined = from the question's wording
+       * (tasks.ts taskOfQuestion), null = none. */
+      task?: ChatTask | null;
       /** Repetition guard of the words (repetition.ts; unset fields: DEFAULT_REPETITION): the CTRL-style penalty and its
        * window, the no-repeat n-gram size (0 = off), and the loop stop (a sentence repeated 3 times or a repeated move
        * line ends the answer with <|eos|> / closes the think). */
