@@ -8,8 +8,9 @@ const src = resolve(process.env.CHESSMIND_EXPORT ?? '../ChessMind/export/onnx');
 const dest = 'public/chessmind';
 // Listed first = default in the app's model selector.
 const CONTEXT_BLOCKS = new Set([]);
-const ORDER = ['v5-250m-v6-s20k', 'v5-250m-v6-s10k', 'v5-250m-s95k', 'v5-250m-s30k', 'v5-250m-s20k', 'restart-v3-250m-s90k', 'restart-v3-250m-s50k', 'medium-100m-live-vast', 'exp-small-board', 'exp-small'];
+const ORDER = ['v5-250m-v6-s45k', 'v5-250m-v6-s20k', 'v5-250m-v6-s10k', 'v5-250m-s95k', 'v5-250m-s30k', 'v5-250m-s20k', 'restart-v3-250m-s90k', 'restart-v3-250m-s50k', 'medium-100m-live-vast', 'exp-small-board', 'exp-small'];
 const DESCRIPTIONS = {
+  'v5-250m-v6-s45k': 'v6 run, step 45,000 (~920M of 5.1B tokens). Trained through the 35k-44k data (Q&A, theory transcripts, rebuilt theory thinks, intent / perspective Q&A live from Mongo); the 45k code update (chained thinks, request-aware thinks, puzzle phrasings, cleaning) starts after this step. int8, KV cache.',
   'v5-250m-v6-s20k': 'v6 restart, step 20,000 (~410M of 5.1B tokens). Same recipe as 10k plus the 10k update (Q&A weights, chat pool, Usenet removed). int8, KV cache.',
   'v5-250m-v6-s10k': 'v6 restart, step 10,000 (~205M of 5.1B tokens). 268M: board input shows the position under discussion, move number / castling / feature planes in the board embedding, board-fact head; prompt blocks, tools, rewind, drills, new puzzles, think-then-move. Early checkpoint. int8, KV cache.',
   'v5-250m-s95k': 'v5 run, step 95,000 (~1.95B of 5.1B tokens). 255M, 2,560 context, hidden reasoning, line markers. Same data recipe as 30k plus openings / puzzles in the games group (35k) and the data-loader fix (40k). Large download (275 MB). int8, KV cache.',
