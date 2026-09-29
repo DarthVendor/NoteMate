@@ -2,10 +2,15 @@ import type { DialoguePart, DialogueTurn } from './tokenizer';
 import type { LineRules } from './lineRules';
 import type { ChatLeafPart } from '../types';
 import type { ChatMode } from './roles';
+import type { LoopEvent, RepetitionRules } from './repetition';
 
 /** Default think budget: tokens of hidden reasoning before <|end_think|> is forced (as chat() in generate.py).
  * Training thinks run from ~50 to ~2,000 tokens; a whole training example fits the 2,560-token context. */
 export const DEFAULT_MAX_THINK_TOKENS = 2560;
+/** The answer's own budget (the think comes on top): 512 tokens covers ~96% of training answers (median ~50, p95
+ * ~410, p99 ~840 in a sample of 6.4k). The worker used to add the whole think budget to it, so an answer without a
+ * think could run ~2,600 tokens; it now stops the answer itself at this many (as chat() in generate.py). */
+export const DEFAULT_CHAT_MAX_TOKENS = 512;
 /** Move lines in chat answers are greedy (as chat() in generate.py, line_temperature=0); temperature applies to text. */
 export const DEFAULT_LINE_TEMPERATURE = 0;
 
@@ -114,7 +119,8 @@ export type ToWorker =
       /** The game from the initial position when only `fen` is sent: not in the prompt, only boards an answer's
        * snapshot may rewind to (the positions along it; the initial position is always one). */
       gameMoves?: string[];
-      /** Answer budget (the think budget comes on top). */
+      /** The answer's own budget: the answer after the think stops at this many tokens (the think budget and tool
+       * results come on top). */
       maxTokens: number;
       /** Text sampling temperature (words only). */
       temperature: number;
@@ -143,6 +149,10 @@ export type ToWorker =
       /** Prompt-role models (manifest `prompt_roles`): the app mode and a goal for the system turn (roles.ts). */
       mode?: ChatMode;
       goal?: string;
+      /** Repetition guard of the words (repetition.ts; unset fields: DEFAULT_REPETITION): the CTRL-style penalty and its
+       * window, the no-repeat n-gram size (0 = off), and the loop stop (a sentence repeated 3 times or a repeated move
+       * line ends the answer with <|eos|> / closes the think). */
+      repetition?: Partial<RepetitionRules>;
     }
   /** The app's answer to a `tool-call`: the result text (an error result when `ok` is false). */
   | { type: 'tool-result'; id: number; call: number; text: string; ok: boolean; compact?: string[] }
@@ -187,8 +197,13 @@ export type LineEndReason = 'rule' | 'threshold' | 'model';
 export interface ChatTrace {
   /** Per generated <|end_line|>, in order (think lines first): why, P(<|end_line|>) among the allowed ids, where. */
   lineEnds: { reason: LineEndReason; p: number; inThink: boolean }[];
-  /** What ended the answer: <|eos|>, a new <|user|> turn, the token budget, or a stop request. */
-  stop: 'eos' | 'user' | 'budget' | 'stopped';
+  /** What ended the answer: <|eos|>, a new <|user|> turn, the repetition guard's loop stop (then <|eos|>), the token
+   * budget, or a stop request. */
+  stop: 'eos' | 'user' | 'loop' | 'budget' | 'stopped';
+  /** Loops the repetition guard stopped (a think loop closes the think; the answer goes on). */
+  loops?: LoopEvent[];
+  /** Answer tokens (after the think; tool results not counted). */
+  answerTokens?: number;
   promptTokens: number;
   /** The whole prompt the model saw, decoded (special tokens included). */
   prompt?: string;

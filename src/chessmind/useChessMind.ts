@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ChessMindWorker from './worker.ts?worker&inline';
-import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type PickThink, type ThinkMode, type ToWorker } from './protocol';
+import { DEFAULT_CHAT_MAX_TOKENS, DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type PickThink, type ThinkMode, type ToWorker } from './protocol';
 import { historyParts, type DialogueTurn } from './tokenizer';
 import type { DialoguePart } from './tokenizer';
 import type { ChatMessage } from '../types';
 import { DEFAULT_LINE_RULES } from './lineRules';
+import { DEFAULT_REPETITION } from './repetition';
 import type { GameAction } from '../state/gameReducer';
 import type { UserSideSetting } from './chatContext';
 import { newId } from '../state/pgn';
@@ -65,6 +66,11 @@ export interface ChessMindSettings {
   /** A goal stated in the chat ("White has checkmate in 2") is asked in the puzzle layout and the answer checked
    * (usePuzzle.ts askGoal); unset = on. */
   goalPuzzles?: boolean;
+  /** Chat text repetition penalty (repetition.ts, CTRL-style over the last 200 answer tokens; 1 = off). */
+  repetitionPenalty: number;
+  /** End an answer that loops (a sentence repeated 3 times, a move line repeated) with <|eos|>; a looping think is
+   * closed. */
+  stopLoops: boolean;
 }
 
 export interface PickResult {
@@ -97,12 +103,13 @@ const STORAGE_KEY = 'notemate.chessmind.v1';
 const SETTINGS_VERSION = 2;
 /** Plies of history the simulator gives a board-embedding model (see pick). */
 const SIM_CONTEXT_PLIES = 16;
-const DEFAULTS: ChessMindSettings = { enabled: false, modelId: '', backend: 'auto', arrows: true, aboutPosition: false, sendMoves: true, contextPlies: 'full', think: 'auto', temperature: 0.8, lineEndAnswer: DEFAULT_LINE_RULES.endP.answer, lineEndThink: DEFAULT_LINE_RULES.endP.think, maxLinePliesAnswer: DEFAULT_LINE_RULES.maxPlies.answer, maxLinePliesThink: DEFAULT_LINE_RULES.maxPlies.think, engineContext: true, candidatesContext: true, checkClaims: true, tools: 'off', userSide: 'auto', thinkAnchor: true };
+const DEFAULTS: ChessMindSettings = { enabled: false, modelId: '', backend: 'auto', arrows: true, aboutPosition: false, sendMoves: true, contextPlies: 'full', think: 'auto', temperature: 0.8, lineEndAnswer: DEFAULT_LINE_RULES.endP.answer, lineEndThink: DEFAULT_LINE_RULES.endP.think, maxLinePliesAnswer: DEFAULT_LINE_RULES.maxPlies.answer, maxLinePliesThink: DEFAULT_LINE_RULES.maxPlies.think, engineContext: true, candidatesContext: true, checkClaims: true, tools: 'off', userSide: 'auto', thinkAnchor: true, repetitionPenalty: DEFAULT_REPETITION.penalty, stopLoops: DEFAULT_REPETITION.stopLoops };
 /** Earlier chat turns (user + assistant messages) sent with a question, so follow-ups like "no, the other one"
  * have their context. The KV cache makes the extra prompt a one-off prefill; the worker trims the think budget
  * (and drops the oldest turns) to fit the context. */
 const HISTORY_TURNS = 6;
-export const CHAT_MAX_TOKENS = 60;
+/** The answer's own budget (protocol.ts DEFAULT_CHAT_MAX_TOKENS; the think comes on top). */
+export const CHAT_MAX_TOKENS = DEFAULT_CHAT_MAX_TOKENS;
 /** Budget of the hidden reasoning (on top of CHAT_MAX_TOKENS; the worker shrinks it to what the model's context leaves).
  * Training thinks run from ~50 to ~2,000 tokens; the close is forced gracefully at the budget. */
 export const CHAT_MAX_THINK_TOKENS = DEFAULT_MAX_THINK_TOKENS;
@@ -383,9 +390,9 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
         ],
       });
       const tools = settings.tools !== 'off' ? { names: OFFERED_TOOLS, takesLine: Object.fromEntries(OFFERED_TOOLS.map((n) => [n, TOOL_SPECS[n].takesLine])), force: settings.tools === 'force' ? 'engine' : null } : undefined;
-      worker.postMessage({ type: 'chat', id, ...takeFresh(), history, prompt: text, fen: opts.fen, context: opts.context, gameMoves: opts.gameMoves, contextText: opts.contextText || undefined, maxTokens: CHAT_MAX_TOKENS, temperature: settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: settings.think, maxThinkTokens: CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } }, tools } satisfies ToWorker);
+      worker.postMessage({ type: 'chat', id, ...takeFresh(), history, prompt: text, fen: opts.fen, context: opts.context, gameMoves: opts.gameMoves, contextText: opts.contextText || undefined, maxTokens: CHAT_MAX_TOKENS, temperature: settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: settings.think, maxThinkTokens: CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } }, tools, repetition: { penalty: settings.repetitionPenalty, stopLoops: settings.stopLoops } } satisfies ToWorker);
     },
-    [chat, status, dispatch, info?.manifest.think_chain, settings.think, settings.temperature, settings.lineEndAnswer, settings.lineEndThink, settings.maxLinePliesAnswer, settings.maxLinePliesThink, settings.tools],
+    [chat, status, dispatch, info?.manifest.think_chain, settings.think, settings.temperature, settings.lineEndAnswer, settings.lineEndThink, settings.maxLinePliesAnswer, settings.maxLinePliesThink, settings.tools, settings.repetitionPenalty, settings.stopLoops],
   );
 
   /** Puzzle mode (usePuzzle.ts): ask with the question's exact parts and an explicit history (the training layout,
@@ -410,10 +417,10 @@ export function useChessMind(moves: string[] | null, chat: ChatMessage[], dispat
       });
       const done = new Promise<{ parts: DialoguePart[]; stopped?: boolean } | null>((resolve) => partsWait.current.set(id, resolve));
       // prompt-role models (manifest prompt_roles): the system turn says [Mode: puzzle] and carries the app's goal
-      worker.postMessage({ type: 'chat', id, ...takeFresh(), history: o.history, prompt: o.label, parts: o.parts, mode: 'puzzle', ...(o.goal ? { goal: o.goal } : {}), maxTokens: o.maxTokens ?? CHAT_MAX_TOKENS, temperature: o.temperature ?? settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: o.think ?? settings.think, maxThinkTokens: o.maxThinkTokens ?? CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } } } satisfies ToWorker);
+      worker.postMessage({ type: 'chat', id, ...takeFresh(), history: o.history, prompt: o.label, parts: o.parts, mode: 'puzzle', ...(o.goal ? { goal: o.goal } : {}), maxTokens: o.maxTokens ?? CHAT_MAX_TOKENS, temperature: o.temperature ?? settings.temperature, topK: 50, lineTemperature: DEFAULT_LINE_TEMPERATURE, think: o.think ?? settings.think, maxThinkTokens: o.maxThinkTokens ?? CHAT_MAX_THINK_TOKENS, lineRules: { endP: { answer: settings.lineEndAnswer, think: settings.lineEndThink }, maxPlies: { answer: settings.maxLinePliesAnswer, think: settings.maxLinePliesThink } }, repetition: { penalty: settings.repetitionPenalty, stopLoops: settings.stopLoops } } satisfies ToWorker);
       return done;
     },
-    [status, dispatch, settings.think, settings.temperature, settings.lineEndAnswer, settings.lineEndThink, settings.maxLinePliesAnswer, settings.maxLinePliesThink],
+    [status, dispatch, settings.think, settings.temperature, settings.lineEndAnswer, settings.lineEndThink, settings.maxLinePliesAnswer, settings.maxLinePliesThink, settings.repetitionPenalty, settings.stopLoops],
   );
 
   /** Top moves for the position after `movesUci` plus a short explanation from the model. */

@@ -397,6 +397,11 @@ export class ChessTokenizer {
     return out;
   }
 
+  /** The raw byte-level BPE string of a text id ('' for others): 'Ġ' = a leading space, 'Ċ' = a newline. */
+  textTokenString(id: number): string {
+    return this.idToToken[id - this.textOffset] ?? '';
+  }
+
   decodeText(ids: number[]): string {
     const bytes: number[] = [];
     for (const i of ids) {

@@ -19,7 +19,7 @@
 //   node scripts/cm-chat.mjs --daemon &                     # keep one browser + loaded model; later calls reuse it
 //   node scripts/cm-chat.mjs --stop-daemon
 //
-// Other options: --temp T (0.8) --top-k K (50) --max-tokens N (60) --max-think N (2560) --context auto|auto!|"<text>"
+// Other options: --temp T (0.8) --top-k K (50) --max-tokens N (512, the answer; the think comes on top) --max-think N (2560) --context auto|auto!|"<text>"
 // --engine-context --tools on|force|off|engine,notes --notes '{"4":"my note on 2...Nc6"}' --about-position
 // --timeout S (per answer, 300) --url http://localhost:4173 --no-host-start --build --full (raw parts) --no-daemon
 // --headed. The host (npm run host: app :4173 + engine server :4174) is started in the background when not running

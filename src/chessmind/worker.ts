@@ -20,6 +20,7 @@ import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_PRIOR_THINKS, DEFAULT_MAX_THINK_T
 import { ThinkMoveConstraint, anchorIds } from './thinkMove';
 import { fitHistory, thinkPrefixIds } from './thinkThread';
 import { PROMPT_ROLES_VERSION, promptTurns } from './roles';
+import { DEFAULT_REPETITION, RepetitionGuard } from './repetition';
 
 // Minimal typing of the onnxruntime-web globals used here.
 interface OrtTensor { data: Float32Array | BigInt64Array; dims: readonly number[]; dispose?: () => void }
@@ -630,6 +631,9 @@ interface GenOptions {
   sampling?: () => { temperature: number; topK: number };
   /** Called with each step's logits, the allowed ids and the chosen id. */
   observe?: (logits: Float32Array, allowed: number[], next: number) => void;
+  /** The repetition guard (repetition.ts): after `allowed`, may change the logits in place (the penalty), narrow the
+   * allowed ids (the n-gram block) and force an id (a loop's close). */
+  shape?: (out: number[], logits: Float32Array, allowed: number[]) => { allowed: number[]; forced: number | null };
 }
 
 /** Sample up to maxTokens ids, streaming chat-update messages; stops on a stop id or a stop request. Returns the ids. */
@@ -669,11 +673,18 @@ async function generate(o: GenOptions): Promise<number[]> {
     const dt = performance.now() - t0;
     if (step === 0) prefillMs = dt;
     genMs += dt;
-    const allowed = o.allowed(out);
+    let allowed = o.allowed(out);
+    let forced: number | null = null;
+    if (o.shape) ({ allowed, forced } = o.shape(out, logits, allowed));
     const custom = o.sampling?.();
     const temperature = custom ? custom.temperature : inLine && o.lineTemperature !== undefined ? o.lineTemperature : o.temperature;
     const tau = o.endLine?.threshold() ?? null;
-    const next = tau !== null && probAmong(logits, allowed, o.endLine!.id) >= tau ? o.endLine!.id : sample(logits, allowed, temperature, custom ? custom.topK : o.topK);
+    const next =
+      forced !== null
+        ? forced
+        : tau !== null && probAmong(logits, allowed, o.endLine!.id) >= tau
+          ? o.endLine!.id
+          : sample(logits, allowed, temperature, custom ? custom.topK : o.topK);
     o.observe?.(logits, allowed, next);
     out.push(next);
     if (next === lineId) inLine = true;
@@ -785,7 +796,15 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
       }
     : undefined;
   const maxTokens = req.maxTokens + (thinking ? maxThink + 2 : 0) + toolBudget;
+  // Repetition guard of the words (penalty, n-gram block, loop stop), as chat() in generate.py; it also counts the
+  // answer's own tokens: the answer after the think stops at req.maxTokens
+  const guard = new RepetitionGuard(t, { ...DEFAULT_REPETITION, ...req.repetition });
   const out = await generate({
+    shape: (out, logits, allowed) => guard.shape(out, logits, allowed),
+    until: (out) => {
+      guard.sync(out);
+      return guard.answerTokens >= req.maxTokens;
+    },
     observe,
     id: req.id,
     prefix,
@@ -799,7 +818,10 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
     allowed: (out) => constraint.allowed(out),
     endLine: { id: t.endLineId, threshold: () => constraint.endThreshold() },
     stops: new Set([t.eosId, t.userId]),
-    render: (out) => {
+    render: (all) => {
+      // the repeats a loop stop cut (the think's close and the answer's <|eos|> stay)
+      guard.sync(all);
+      const out = guard.keep(all);
       const parts = t.decodeDialogueContent(out);
       if (made.length) {
         let k = 0;
@@ -817,8 +839,8 @@ async function chat(req: Extract<ToWorker, { type: 'chat' }>) {
   });
   if (req.trace) {
     const last = out[out.length - 1];
-    const stop = last === t.eosId ? 'eos' : last === t.userId ? 'user' : stopped.has(req.id) ? 'stopped' : 'budget';
-    post({ type: 'chat-trace', id: req.id, trace: { lineEnds, stop, promptTokens: prefix.length, prompt: t.decode(prefix), maxTokens, maxThinkTokens: thinking ? maxThink : 0 } });
+    const stop = last === t.eosId ? (guard.stop ?? 'eos') : last === t.userId ? 'user' : stopped.has(req.id) ? 'stopped' : 'budget';
+    post({ type: 'chat-trace', id: req.id, trace: { lineEnds, stop, loops: guard.loops, answerTokens: guard.answerTokens, promptTokens: prefix.length, prompt: t.decode(prefix), maxTokens, maxThinkTokens: thinking ? maxThink : 0 } });
   }
 }
 

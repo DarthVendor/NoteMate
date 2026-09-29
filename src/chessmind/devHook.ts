@@ -10,7 +10,7 @@
  */
 import { Chess } from 'chess.js';
 import ChessMindWorker from './worker.ts?worker&inline';
-import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, DEFAULT_THINK_MOVE_TOKENS, type Backend, type ChatTrace, type FromWorker, type ModelManifest, type ThinkMode, type ToWorker } from './protocol';
+import { DEFAULT_CHAT_MAX_TOKENS, DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_THINK_TOKENS, DEFAULT_THINK_MOVE_TOKENS, type Backend, type ChatTrace, type FromWorker, type ModelManifest, type ThinkMode, type ToWorker } from './protocol';
 import { historyParts, splitThink, type DialogueTurn } from './tokenizer';
 import type { ChatLeafPart, ChatMessage, ChatPart, GameState, MoveNode } from '../types';
 import { ROOT_ID } from '../types';
@@ -75,6 +75,8 @@ export interface DevAskOptions {
   maxThinkTokens?: number;
   lineTemperature?: number;
   lineRules?: Extract<ToWorker, { type: 'chat' }>['lineRules'];
+  /** Repetition guard knobs (unset: DEFAULT_REPETITION, as the panel): `{ penalty: 1, ngram: 0, stopLoops: false }` = off. */
+  repetition?: Extract<ToWorker, { type: 'chat' }>['repetition'];
   /** Load this model first when another one is loaded. */
   model?: string;
   timeoutMs?: number;
@@ -108,6 +110,9 @@ export interface DevAnswer {
   prefillMs?: number;
   msPerToken: number;
   stop: string;
+  /** Loops the repetition guard stopped (trace.loops) and the answer's own token count. */
+  loops?: ChatTrace['loops'];
+  answerTokens?: number;
   promptTokens?: number;
   lines: DevLine[];
   tools: { where: 'think' | 'answer'; name: string; line?: string; result?: string; ok?: boolean }[];
@@ -403,13 +408,14 @@ class DevChessMind {
         gameMoves,
         contextText: contextText || undefined,
         parts: o.parts,
-        maxTokens: o.maxTokens ?? 60,
+        maxTokens: o.maxTokens ?? DEFAULT_CHAT_MAX_TOKENS,
         temperature: o.temperature ?? 0.8,
         topK: o.topK ?? 50,
         lineTemperature: o.lineTemperature ?? DEFAULT_LINE_TEMPERATURE,
         think: o.think ?? 'auto',
         maxThinkTokens: o.maxThinkTokens ?? DEFAULT_MAX_THINK_TOKENS,
         lineRules: o.lineRules,
+        repetition: o.repetition,
         tools,
         seed: o.seed,
         freshCache: o.freshCache ?? o.seed !== undefined,
@@ -510,6 +516,8 @@ class DevChessMind {
       prefillMs: f?.prefillMs !== undefined ? Math.round(f.prefillMs) : undefined,
       msPerToken: Math.round((f?.msPerToken ?? 0) * 10) / 10,
       stop: a.error ? `error: ${a.error}` : (a.trace?.stop ?? '?'),
+      ...(a.trace?.loops?.length ? { loops: a.trace.loops } : {}),
+      answerTokens: a.trace?.answerTokens,
       promptTokens: a.trace?.promptTokens,
       lines,
       tools,

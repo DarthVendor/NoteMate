@@ -89,6 +89,20 @@ export function ChessMindSettings({ cm }: { cm: ChessMindState }) {
           </label>
           <label className="field">
             <span className="field-label">
+              Repetition penalty <span className="mono faint">{(settings.repetitionPenalty ?? 1.15).toFixed(2)}</span>
+            </span>
+            <input type="range" min={1} max={1.5} step={0.05} value={settings.repetitionPenalty ?? 1.15} onChange={(e) => update({ repetitionPenalty: Number(e.target.value) })} data-testid="chessmind-repetition-penalty" />
+            <span className="field-hint">Makes words used in the last 200 answer tokens less likely (1 = off). Move lines and special tokens are never penalised. The same 8 words never repeat within a stretch of text.</span>
+          </label>
+          <label className="check-row">
+            <span className="check-text">
+              <span>Stop loops</span>
+              <span className="field-hint">End an answer that repeats itself (a sentence 3 times, or the same move line again) and drop the repeat. A looping think is closed and the answer goes on.</span>
+            </span>
+            <input type="checkbox" checked={settings.stopLoops ?? true} onChange={(e) => update({ stopLoops: e.target.checked })} data-testid="chessmind-stop-loops" />
+          </label>
+          <label className="field">
+            <span className="field-label">
               Line end threshold <span className="mono faint">answer {settings.lineEndAnswer.toFixed(2)}</span>
             </span>
             <input type="range" min={0.05} max={1} step={0.05} value={settings.lineEndAnswer} onChange={(e) => update({ lineEndAnswer: Number(e.target.value) })} data-testid="chessmind-line-end-answer" />
