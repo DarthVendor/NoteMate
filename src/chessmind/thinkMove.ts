@@ -58,11 +58,20 @@ export class ThinkMoveConstraint implements GenConstraint {
   private readonly anchor: number[];
   /** The anchor ids still to force (after the side token). */
   private forced: number[] = [];
+  /** The running plan closing the think (ChessMind think_chain plan_part, the prompt-role tokens): <|plan|> once, not
+   * as the first content token, inside it text / lines / <|end_plan|>, then only <|end_think|>. */
+  private readonly planId: number | null;
+  private readonly endPlanId: number | null;
+  private inPlan = false;
+  private planDone = false;
 
   /** `fen`: the game position (undefined = the initial position). Tokenizers without <|end_think|> never think.
-   * `anchorIds`: forced right after the side token (anchorIds(t, side to move is White)); null = none. */
-  constructor(t: ChessTokenizer, fen: string | undefined, think: boolean | null = true, maxThinkTokens: number | null = DEFAULT_THINK_MOVE_TOKENS, rules: LineRules = DEFAULT_LINE_RULES, anchorIds: number[] | null = null) {
+   * `anchorIds`: forced right after the side token (anchorIds(t, side to move is White)); null = none. `plan`: the
+   * think may close with <|plan|> ... <|end_plan|> (models trained with it: manifest think_plan). */
+  constructor(t: ChessTokenizer, fen: string | undefined, think: boolean | null = true, maxThinkTokens: number | null = DEFAULT_THINK_MOVE_TOKENS, rules: LineRules = DEFAULT_LINE_RULES, anchorIds: number[] | null = null, plan = false) {
     this.t = t;
+    this.planId = plan && t.supportsRoles ? t.planId : null;
+    this.endPlanId = this.planId !== null ? t.endPlanId : null;
     this.anchor = [...(anchorIds ?? [])];
     this.fen = fen;
     const endThink = t.endThinkId;
@@ -117,6 +126,15 @@ export class ThinkMoveConstraint implements GenConstraint {
           else if (this.line && t.isMoveId(id)) this.line.push(t.idToMove(id));
           return;
         }
+        if (this.planId !== null && id === this.planId && !this.inPlan) {
+          this.inPlan = true;
+          return;
+        }
+        if (this.endPlanId !== null && id === this.endPlanId && this.inPlan) {
+          this.inPlan = false;
+          this.planDone = true;
+          return;
+        }
         if (id === t.lineId) {
           if (t.supportsBranches) this.walker = new LineWalker(t, this.fen);
           else this.line = new LineWatch(this.fen);
@@ -156,6 +174,11 @@ export class ThinkMoveConstraint implements GenConstraint {
           if (over || this.line.plies >= max || (this.rules.stopFinished && this.line.ended())) return [t.endLineId];
           const moves = this.line.board.moves({ verbose: true }).map((m) => t.moveToId(m.lan));
           return [...moves, t.endLineId];
+        }
+        if (this.planId !== null) {
+          if (this.planDone) return [t.endThinkId!];
+          if (this.inPlan) return over ? [this.endPlanId!] : [...this.thinkText.filter((i) => i !== t.endThinkId), this.endPlanId!];
+          if (!over && this.thinkTokens >= 2 + this.anchor.length) return [...this.thinkText, this.planId];
         }
         if (over) return [t.endThinkId!];
         return this.thinkText;

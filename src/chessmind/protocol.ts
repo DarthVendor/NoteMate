@@ -41,6 +41,9 @@ export interface ModelManifest {
    * the next think (thinkThread.ts). Absent / false: the bare game and answers only (older models get worse with
    * them: v6 s20k's false claims per think went 1.8 -> 3.6 with its earlier thinks kept). */
   think_chain?: boolean;
+  /** In-game thinks close with the running plan <|plan|> ... <|end_plan|> (ChessMind think_chain plan_part): the think
+   * pick allows it (thinkMove.ts) and earlier thinks shrink to their plan before they leave the context. */
+  think_plan?: boolean;
   /** Text tokenizer format (2 = GPT-2 split; 3 = chess-notation split + prefix space; 4 = 3 + <|end_think|>). */
   tokenizer_format?: number;
   quant: string;

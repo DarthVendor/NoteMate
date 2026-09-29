@@ -38,16 +38,22 @@ for (const s of fx.sequences) {
 const text = [];
 for (let i = tok.textOffset; i < tok.extraOffset; i++) text.push(i);
 const TEXT = JSON.stringify([...text, tok.lineId, tok.endThinkId].sort((a, b) => a - b));
+// the plan states (ChessMind think_chain plan_part): TEXT + <|plan|>, and inside a plan text / lines / <|end_plan|>
+const NAMED = {
+  TEXT,
+  'TEXT+PLAN': JSON.stringify([...text, tok.lineId, tok.endThinkId, tok.planId].sort((a, b) => a - b)),
+  PLAN_TEXT: JSON.stringify([...text, tok.lineId, tok.endPlanId].sort((a, b) => a - b)),
+};
 const sorted = (ids) => [...ids].sort((a, b) => a - b);
 for (const w of fx.walks) {
   const board = new Chess();
   for (const m of w.moves) board.move({ from: m.slice(0, 2), to: m.slice(2, 4), promotion: m[4] });
-  const c = new ThinkMoveConstraint(tok, board.fen(), w.think, w.max_think_tokens);
+  const c = new ThinkMoveConstraint(tok, board.fen(), w.think, w.max_think_tokens, undefined, null, !!w.plan);
   let bad = null;
   w.steps.forEach((s, i) => {
     if (bad) return;
     const got = sorted(c.allowedIds());
-    const ok = s.allowed === 'TEXT' ? JSON.stringify(got) === TEXT : same(got, s.allowed);
+    const ok = typeof s.allowed === 'string' ? JSON.stringify(got) === NAMED[s.allowed] : same(got, s.allowed);
     if (!ok) bad = `step ${i} allowed: ${got.length} ids ${got.slice(0, 8)} vs ${s.allowed === 'TEXT' ? 'TEXT' : s.allowed.slice(0, 8)}`;
     else if (s.token !== null) {
       c.feed(s.token);
@@ -69,7 +75,7 @@ for (const w of fx.walks) {
   let ok = true;
   for (const s of w.steps) {
     const got = sorted(c.allowed(out));
-    if (s.allowed !== 'TEXT' && !same(got, s.allowed)) ok = false;
+    if (typeof s.allowed !== 'string' && !same(got, s.allowed)) ok = false;
     if (s.token !== null) out.push(s.token);
   }
   check('allowed(out) syncs like feed', ok && c.move === w.move);

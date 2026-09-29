@@ -510,7 +510,7 @@ async function thinkPick(req: Extract<ToWorker, { type: 'pick' }>): Promise<bool
   };
   // The think opens with the perspective anchor for the side to move ("I'm playing Black, and it's my move."), forced
   const anchor = req.anchor !== false && t.endThinkId !== null ? anchorIds(t, chess.turn() === 'w') : null;
-  const cons = new ThinkMoveConstraint(t, chess.fen(), req.think === 'on' ? true : null, maxThink, rules, anchor);
+  const cons = new ThinkMoveConstraint(t, chess.fen(), req.think === 'on' ? true : null, maxThink, rules, anchor, !!manifest!.think_plan);
   // Board rows of the generated tokens: a legacy tracker primed with the whole game (its state is the game position).
   let tracker: BoardTracker | null = prior?.tracker ?? null;
   if (game.rows && !tracker) {

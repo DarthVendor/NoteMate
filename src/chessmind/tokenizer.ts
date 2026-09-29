@@ -145,8 +145,10 @@ export function splitThink(parts: DialoguePart[]): { think: ChatLeafPart[]; answ
  * generate.history_turn. */
 export function historyParts(parts: DialoguePart[], keepThink = true): DialoguePart[] {
   const { think, answer } = splitThink(parts);
-  const closed = parts.some((p) => p.kind === 'think' && !p.open);
-  return keepThink && closed ? [{ kind: 'think', parts: think }, ...answer] : answer;
+  const th = parts.find((p) => p.kind === 'think');
+  const closed = !!th && th.kind === 'think' && !th.open;
+  const plan = th?.kind === 'think' && th.plan?.length ? { plan: th.plan } : {};
+  return keepThink && closed ? [{ kind: 'think', parts: think, ...plan }, ...answer] : answer;
 }
 
 export class ChessTokenizer {
