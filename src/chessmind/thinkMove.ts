@@ -22,6 +22,7 @@ import { DEFAULT_LINE_RULES, LineWatch, type LineRules } from './lineRules.ts';
 import { LineWalker } from './lines.ts';
 import type { GenConstraint } from './constraint';
 import { DEFAULT_THINK_MOVE_TOKENS } from './protocol.ts';
+import type { ChatLeafPart } from '../types';
 
 export type ThinkMovePhase = 'start' | 'side' | 'think' | 'move' | 'done';
 
@@ -201,4 +202,68 @@ export class ThinkMoveConstraint implements GenConstraint {
     if (this.walker?.inBranch) return null;
     return this.rules.endP.think;
   }
+}
+
+/** SAN-like move tokens inside free text: pieces, disambiguation, captures, destination square, promotion,
+ * check/mate suffix, or castling (both "O-O"/"O-O-O" and "0-0"/"0-0-0" spellings). Permissive on purpose: a leading
+ * move number ("13...", "30.") is not part of the token and is left out by not matching it. */
+const SAN_TOKEN = /O-O-O|O-O|0-0-0|0-0|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?/g;
+
+/** The last non-empty sentence of `text` (split at ". " / "! " / "? " boundaries; a bare "13..." or "30." move-number
+ * prefix has no following space before its move, so it never splits a decision sentence off its move). */
+function lastSentence(text: string): string {
+  const sentences = text
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return sentences.length ? sentences[sentences.length - 1] : text.trim();
+}
+
+/**
+ * The move a closed think's own decision sentence names, if it parses unambiguously to one legal move of `fen`.
+ * Training guarantees the move right after `<|end_think|>` is always identical to the move named in the think's own
+ * closing decision sentence (ChessMind `chessmind/data/game_thinks.py::encode_think_game` appends the exact same
+ * `moves[ply]` that `game_thinks_build.py::render_engine_think` phrases via `engine_dialogues.move_label()`; see
+ * ChessMind docs/v5-rl.md section 1 for the phrasings this is built to parse: "So e4.", "13...fxe6 it is.",
+ * "So 30.Qh7+.", "Nb6#" style declarations). At inference the move token is only sampled independently and legality-
+ * constrained (`ThinkMoveConstraint` above), so nothing ties it back to what the think's prose just concluded --
+ * this is the override that restores that link.
+ *
+ * Finds the last `{kind:'text'}` part of `parts` (the decision sentence is always at the very end of the think),
+ * takes its last sentence, extracts SAN-like tokens (`SAN_TOKEN`) and resolves each against a fresh board at `fen`
+ * with chess.js (permissive SAN parsing, not sloppy in the piece sense but tolerant of the usual variations).
+ * Returns the move's UCI when every candidate that resolves agrees on exactly one legal move; null when nothing
+ * named parses/is legal, or when more than one distinct legal move is named (ambiguous) -- callers should fall back
+ * to the independently sampled move token unchanged in either case.
+ */
+export function decisionMove(parts: ChatLeafPart[], fen: string): string | null {
+  let text: string | null = null;
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i];
+    if (p.kind === 'text') {
+      text = p.text;
+      break;
+    }
+  }
+  if (!text) return null;
+  const trimmed = text.trim();
+  // Every documented decision sentence ends with terminal punctuation ("So e4.", "13...fxe6 it is.", "So 30.Qh7+.").
+  // When the think was force-closed by hitting its token budget mid-sentence, the trailing text has none: it is a
+  // half-finished clause (maybe naming a candidate still under comparison, not the actual decision), so it is never
+  // treated as a decision here.
+  if (!trimmed || !/[.!?]$/.test(trimmed)) return null;
+  const sentence = lastSentence(trimmed);
+  const candidates = sentence.match(SAN_TOKEN);
+  if (!candidates || !candidates.length) return null;
+  const found = new Set<string>();
+  for (const c of candidates) {
+    try {
+      const board = new Chess(fen);
+      const mv = board.move(c);
+      found.add(`${mv.from}${mv.to}${mv.promotion ?? ''}`);
+    } catch {
+      // Not a legal move of this position (or not really SAN at all): ignored, not an error.
+    }
+  }
+  return found.size === 1 ? [...found][0] : null;
 }

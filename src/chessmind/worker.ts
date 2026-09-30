@@ -17,7 +17,7 @@ import { anchorUserLines, dialoguePosition, rewindCandidates } from './snapshots
 import { LineConstraint, MAX_TOOL_CALLS, ToolConstraint, type GenConstraint, type ToolRequestInfo } from './constraint';
 import { DEFAULT_TOOL_TIMEOUT_MS, RESULT_BUDGET, TOOL_SPECS, addToolsBlock, errorText, fitToolResult, type ToolResultData } from './tools';
 import { DEFAULT_LINE_TEMPERATURE, DEFAULT_MAX_PRIOR_THINKS, DEFAULT_MAX_THINK_TOKENS, DEFAULT_THINK_MOVE_TEMPERATURE, DEFAULT_THINK_MOVE_TOKENS, DEFAULT_THINK_MOVE_TOP_K, ORT_DIR, ORT_SCRIPT_FILE, type Backend, type FromWorker, type ModelManifest, type MovePrediction, type PickThink, type ToWorker, type ChatTrace } from './protocol';
-import { ThinkMoveConstraint, anchorIds } from './thinkMove';
+import { ThinkMoveConstraint, anchorIds, decisionMove } from './thinkMove';
 import { fitHistory, thinkPrefixIds } from './thinkThread';
 import { PROMPT_ROLES_VERSION, promptTurns } from './roles';
 import { TASK_MARKERS_VERSION, taskOfQuestion, withTask } from './tasks';
@@ -580,8 +580,25 @@ async function thinkPick(req: Extract<ToWorker, { type: 'pick' }>): Promise<bool
   });
   cons.sync(out);
   if (cons.move === null) return false;
+  const think = renderThink(out);
+  // Training guarantees the move right after <|end_think|> is always the move the think's own closing decision
+  // sentence names (chessmind/data/game_thinks.py::encode_think_game): at inference the move token above is only
+  // sampled independently and legality-constrained, so it can drift from what the think just concluded. When the
+  // decision sentence parses unambiguously to one legal move, play that instead of the independently sampled token.
+  let uci = cons.move;
+  if (!think?.open) {
+    const decided = decisionMove(think?.parts ?? [], chess.fen());
+    if (decided && decided !== uci) {
+      console.debug(`[think-move-override] sampled ${uci}, think decided ${decided} -> playing ${decided}`);
+      if (debug) post({ type: 'debug', data: { tag: `think-move-override ${uci}->${decided}`, n: 0, hit: 0, cache: 0, rowsHash: '' } });
+      uci = decided;
+    } else if (debug) {
+      console.debug(`[think-move-kept] ${uci}${decided ? ' (think agrees)' : ' (no clean decision parsed)'}`);
+      post({ type: 'debug', data: { tag: `think-move-kept ${uci}${decided ? ' (agrees)' : ' (no decision)'}`, n: 0, hit: 0, cache: 0, rowsHash: '' } });
+    }
+  }
   post({
-    type: 'picked', id: req.id, uci: cons.move, p, ms: performance.now() - t0, tokens: game.ids.length + out.length, think: renderThink(out),
+    type: 'picked', id: req.id, uci, p, ms: performance.now() - t0, tokens: game.ids.length + out.length, think,
     top, prompt: t.decode(game.ids.slice(-512)),
   });
   return true;
