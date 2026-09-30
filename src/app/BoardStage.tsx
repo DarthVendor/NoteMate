@@ -7,6 +7,7 @@ import type { Arrow, Square } from '../types';
 import { ROOT_ID } from '../types';
 import { nodeLabel } from '../state/gameReducer';
 import { formatTimeControl } from '../state/pgn';
+import { thinkLineArrows } from '../chessmind/lines';
 import { useApp } from './AppContext';
 import { Onboarding } from './Onboarding';
 
@@ -24,17 +25,25 @@ function statusLine(chess: ReturnType<typeof useApp>['chess']): { text: string; 
 /** The primary surface: game header, eval bar + board, and the navigation strip. */
 export function BoardStage() {
   const app = useApp();
-  const { state, dispatch, chess, fen, annotation, lastMove, orientation, engine, chessmind, ui } = app;
+  const { state, dispatch, chess, fen, annotation, lastMove, orientation, engine, chessmind, sim, ui } = app;
   const [copied, setCopied] = useState(false);
 
   const pinnedCm = annotation.arrows.filter((a) => a.color === 'chessmind');
   const cmMoves = chessmind.settings.enabled && chessmind.settings.arrows && pinnedCm.length === 0 ? (chessmind.prediction?.moves ?? []) : [];
-  const chessmindArrows: Arrow[] = cmMoves.map((m) => ({
-    from: m.uci.slice(0, 2) as Square,
-    to: m.uci.slice(2, 4) as Square,
-    color: 'chessmind' as const,
-    opacity: 0.25 + 0.6 * (m.p / (cmMoves[0]?.p || 1)),
-  }));
+  // The model's live (or just-picked) think-then-move line, while the position it thought about is still on the
+  // board (the same lifecycle as sim.thought: `sim.thought.fen` goes stale, and this clears, the moment the model's
+  // own move -- or anything else -- advances the position).
+  const lineArrows: Arrow[] =
+    chessmind.settings.arrows && sim.thought && sim.thought.fen === fen ? thinkLineArrows(sim.thought.think.parts, sim.thought.fen) : [];
+  const lineFirstPly = lineArrows[0];
+  const chessmindArrows: Arrow[] = cmMoves
+    .filter((m) => !(lineFirstPly && m.uci.slice(0, 2) === lineFirstPly.from && m.uci.slice(2, 4) === lineFirstPly.to))
+    .map((m) => ({
+      from: m.uci.slice(0, 2) as Square,
+      to: m.uci.slice(2, 4) as Square,
+      color: 'chessmind' as const,
+      opacity: 0.25 + 0.6 * (m.p / (cmMoves[0]?.p || 1)),
+    }));
   const engineArrows: Arrow[] = engine.settings.enabled
     ? engine.lines.slice(0, 1).flatMap((l) => (l.pv[0] ? [{ from: l.pv[0].slice(0, 2) as Square, to: l.pv[0].slice(2, 4) as Square, color: 'engine' as const }] : []))
     : [];
@@ -105,7 +114,7 @@ export function BoardStage() {
             <Board
               chess={chess}
               orientation={orientation}
-              arrows={[...chessmindArrows, ...engineArrows, ...annotation.arrows]}
+              arrows={[...chessmindArrows, ...lineArrows, ...engineArrows, ...annotation.arrows]}
               highlights={annotation.highlights}
               lastMove={lastMove}
               onMove={(from, to, promotion) => dispatch({ type: 'MAKE_MOVE', from, to, promotion })}

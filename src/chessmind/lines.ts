@@ -14,7 +14,7 @@
  * python-chess `fen(en_passant="legal")`). Checked against Python by scripts/test-chessmind.mjs.
  */
 import { Chess } from 'chess.js';
-import type { ChatLinePart, LineBranch, LineMark } from '../types';
+import type { Arrow, ChatLeafPart, ChatLinePart, LineBranch, LineMark, Square } from '../types';
 import type { ChessTokenizer } from './tokenizer';
 
 export const MAX_BRANCH_DEPTH = 3;
@@ -314,6 +314,43 @@ export function lineVariations(line: LineSegment): { path: number[]; moves: stri
   };
   visit(line, [], []);
   return out;
+}
+
+/**
+ * Board arrows for a think's currently predicted line: the LAST `{kind:'line'}` part in `parts` (its live, still-
+ * growing moves while the think streams), main line only (branches are display-only text, never drawn). Starts from
+ * `startFen` (the position under thought), unless a `{kind:'fen'}` snapshot appears in `parts` before that line,
+ * which repositions it (mirrors ThinkingBlock's lineFens walk, so the arrows agree with the think's own text).
+ * Opacity fades by ply index (first move most opaque), not by probability. Stops at the first illegal move (a
+ * partial line still mid-stream, its last move not yet fully decoded).
+ */
+export function thinkLineArrows(parts: ChatLeafPart[], startFen?: string): Arrow[] {
+  let fen = startFen;
+  let lineFen = startFen;
+  let moves: string[] | null = null;
+  for (const p of parts) {
+    if (p.kind === 'fen') fen = p.fen;
+    else if (p.kind === 'line' && p.moves.length) {
+      moves = p.moves;
+      lineFen = fen;
+    }
+  }
+  if (!moves) return [];
+  let board: Chess;
+  try {
+    board = new Chess(lineFen);
+  } catch {
+    return [];
+  }
+  const arrows: Arrow[] = [];
+  for (let i = 0; i < moves.length; i++) {
+    const uci = moves[i];
+    const from = uci.slice(0, 2) as Square;
+    const to = uci.slice(2, 4) as Square;
+    if (!play(board, uci)) break;
+    arrows.push({ from, to, color: 'chessmind', opacity: Math.max(0.15, Math.round(0.85 * 0.72 ** i * 100) / 100) });
+  }
+  return arrows;
 }
 
 /** PGN-style text of a line: "1.e4 e5 (1...c5 2.Nf3) 2.Nf3", end markers in brackets ("[draw by repetition]"). */

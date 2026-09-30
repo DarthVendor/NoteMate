@@ -71,8 +71,10 @@ export function ArrowLayer({ arrows, highlights, preview, orientation }: Props) 
           />
         );
       })}
-      {arrows.map((a) => (
-        <ArrowShape key={`${a.color}${a.from}${a.to}`} arrow={a} orientation={orientation} />
+      {arrows.map((a, i) => (
+        // A multi-ply predicted line can revisit the same edge (e.g. a shuffle back to where a piece started), so
+        // the index goes into the key: the color+from+to alone is not always unique.
+        <ArrowShape key={`${a.color}${a.from}${a.to}${i}`} arrow={a} orientation={orientation} />
       ))}
       {preview && preview.from !== preview.to && <ArrowShape arrow={preview} orientation={orientation} faded />}
     </svg>
